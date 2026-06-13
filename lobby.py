@@ -1,37 +1,41 @@
 import os
 import sys
 import time
-import subprocess
 import threading
+import subprocess  # Alterado para suportar execução oculta
 import pyautogui
 import keyboard  # REQUISITO: pip install keyboard
 
 # ==================================================
-# CONFIG
+# ESCONDER O PROMPT ATUAL (SISTEMA OPERACIONAL)
+# ==================================================
+if sys.platform == "win32":
+    import ctypes
+    kernel32 = ctypes.WinDLL('kernel32')
+    user32 = ctypes.WinDLL('user32')
+    hWnd = kernel32.GetConsoleWindow()
+    if hWnd:
+        user32.ShowWindow(hWnd, 0)  # SW_HIDE = 0 (Esconde o prompt)
+
+# Configuração para que os processos filhos também nasçam sem janela preta
+OOCULTAR_PROMPT = subprocess.STARTUPINFO()
+OOCULTAR_PROMPT.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+OOCULTAR_PROMPT.wShowWindow = 0  # SW_HIDE
+
+# ==================================================
+# CONFIGURAÇÃO INTERNACIONAIS E DIRETÓRIOS
 # ==================================================
 
-STEAM_EXE = r"C:\Program Files (x86)\Steam\steam.exe"
 IMG_DIR = "img"
 
-# Resgata a senha global enviada pelo start.py
-PW = os.environ.get("PW_GLOBAL", sys.argv[1] if len(sys.argv) > 1 else "")
-
-# Coordenadas fixas de Backup (Apenas se a imagem falhar completamente)
-COORDS_BACKUP = {
-    "LISTA": (902, 86),
-    "LOBBY": (916, 835),
-    "OK": (1018, 608),
-    "ATT": (1554, 174),
-    "GAME": (447, 239),
-    "ERRO": (965, 612)
-}
+PW = os.environ.get("PW_GLOBAL", sys.argv[1] if len(sys.argv) > 1 else "4433")
 
 # ==================================================
-# PYAUTOGUI
+# CONFIGURAÇÕES DO PYAUTOGUI
 # ==================================================
 
-pyautogui.PAUSE = 0
-pyautogui.FAILSAFE = True  # Pânico: Arrastar o mouse pro canto da tela para o bot
+pyautogui.PAUSE = 0.03
+pyautogui.FAILSAFE = True  
 
 # ==================================================
 # FUNÇÃO DE PARADA DE EMERGÊNCIA (ESC)
@@ -40,8 +44,29 @@ pyautogui.FAILSAFE = True  # Pânico: Arrastar o mouse pro canto da tela para o 
 def verificar_esc():
     """Fica rodando em segundo plano. Se apertar ESC, fecha o script imediatamente."""
     keyboard.wait("esc")
-    print("\n[AVISO] Execução interrompida pelo usuário via tecla ESC!")
+    print("\a")  # Beep de aviso antes de fechar
     os._exit(1)
+
+# ==================================================
+# HELPERS DE JANELA (WINDOWS)
+# ==================================================
+
+def focar_dota():
+    """Procura a janela do Dota 2 pelo título e a traz para o primeiro plano."""
+    if sys.platform == "win32":
+        try:
+            # O título padrão da janela do jogo é "Dota 2"
+            hwnd_dota = user32.FindWindowW(None, "Dota 2")
+            if hwnd_dota:
+                # Se a janela estiver minimizada, restaura
+                user32.ShowWindow(hwnd_dota, 9)  # SW_RESTORE = 9
+                # Traz para frente e foca
+                user32.SetForegroundWindow(hwnd_dota)
+                time.sleep(1.0)  # Tempo para o Windows processar a transição
+                return True
+        except Exception:
+            pass
+    return False
 
 # ==================================================
 # HELPERS DE IMAGEM (TELA CHEIA)
@@ -51,190 +76,153 @@ def img(nome):
     return os.path.join(IMG_DIR, nome)
 
 def localizar(nome, confidence=0.80):
-    """Procura a imagem na tela inteira com tolerância para variações gráficas."""
     try:
         return pyautogui.locateCenterOnScreen(img(nome), confidence=confidence)
     except Exception:
         return None
 
-def esperar(nome, confidence=0.80):
-    """Aguarda pacientemente a imagem aparecer na tela cheia."""
-    print(f"[AGUARDANDO] {nome} na tela cheia...")
+def esperar(nome, confidence=0.80, timeout=60):
+    inicio = time.time()
     while True:
         pos = localizar(nome, confidence)
         if pos:
-            print(f"[OK] {nome} encontrado!")
             return pos
-        time.sleep(0.2)
+        if (time.time() - inicio) > timeout:
+            return None
+        time.sleep(0.3)
 
-def clique_seguro(pos_imagem, coordenada_backup, pausa_antes=0.3):
-    """Clica no centro da imagem encontrada. Se não achar, usa o backup."""
+def clique_seguro(pos_imagem, pausa_antes=0.3):
     if pos_imagem:
         pyautogui.moveTo(pos_imagem[0], pos_imagem[1])
         time.sleep(pausa_antes)
         pyautogui.click()
-    else:
-        # Se a imagem falhar por milissegundos, usa a coordenada padrão para não travar
-        pyautogui.moveTo(*coordenada_backup)
-        time.sleep(pausa_antes)
-        pyautogui.click()
+        return True
+    return False
 
 # ==================================================
-# DOTA
+# FLUXO DE EXECUÇÃO DO JOGO
 # ==================================================
 
 def abrir_dota():
-    print("[INFO] Abrindo Dota 2")
-    if not os.path.isfile(STEAM_EXE):
-        raise FileNotFoundError(f"Steam não encontrada: {STEAM_EXE}")
+    """Foca o Dota 2 se já estiver aberto, ou inicia via Steam caso não esteja."""
+    # Tenta focar a janela primeiro
+    if focar_dota():
+        return  # Se achou e focou, não precisa abrir de novo
 
-    subprocess.Popen(
-        [STEAM_EXE, "-applaunch", "570"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-# ==================================================
-# MENU PRINCIPAL
-# ==================================================
+    # Caso não encontre a janela aberta, inicia o processo
+    try:
+        subprocess.Popen(["cmd", "/c", "start", "steam://run/570"], startupinfo=OOCULTAR_PROMPT)
+        # Espera um tempo inicial para o processo começar a carregar a janela
+        time.sleep(5.0)
+    except Exception:
+        os._exit(1)
 
 def etapa_menu():
-    print("[INFO] Aguardando o menu principal do Dota carregar...")
+    if not os.path.exists(IMG_DIR):
+        os._exit(1)
+
     while True:
-        # Se achar o botão LISTA, o menu estabilizou
+        # Garante foco contínuo no início da detecção caso o jogo mude de estado
+        focar_dota()
+        
         lista = localizar("lista.png")
         if lista:
-            print("[OK] Botão LISTA visível.")
             break
 
-        # Se o Dota abrir em uma aba errada, clica em image.png para resetar a tela
         image = localizar("image.png")
         if image:
-            clique_seguro(image, coordenada_backup=COORDS_BACKUP["LISTA"])
+            clique_seguro(image)
 
-        time.sleep(0.2)
+        time.sleep(0.5)
 
-    # Clica no botão LISTA
-    print("[INFO] Clicando no botão LISTA...")
-    lista_pos = localizar("lista.png")
-    clique_seguro(lista_pos, coordenada_backup=COORDS_BACKUP["LISTA"])
+    clique_seguro(localizar("lista.png"))
     time.sleep(0.8)
 
-    # Clica no botão LOBBY
-    print("[INFO] Clicando no botão LOBBY...")
-    lobby_pos = localizar("lobby.png")
-    clique_seguro(lobby_pos, coordenada_backup=COORDS_BACKUP["LOBBY"], pausa_antes=0.4)
-
-# ==================================================
-# SENHA
-# ==================================================
+    clique_seguro(esperar("lobby.png"), pausa_antes=0.4)
 
 def etapa_senha():
-    # Espera o botão OK do painel de senha surgir na tela
     ok_pos = esperar("ok.png")
-    time.sleep(0.4)
+    if not ok_pos:
+        return
+    
+    time.sleep(0.3)
+    focar_dota()  # Garante foco antes de enviar comandos de teclado genéricos
 
-    print("[INFO] Limpando o campo de texto por segurança...")
     pyautogui.hotkey("ctrl", "a")
     time.sleep(0.1)
     pyautogui.press("backspace")
     time.sleep(0.1)
 
-    print(f"[INFO] Digitando a senha: {PW}")
     pyautogui.write(PW, interval=0.05)
     time.sleep(0.2)
 
-    print("[INFO] Confirmando senha...")
-    clique_seguro(ok_pos, coordenada_backup=COORDS_BACKUP["OK"])
-    print("[OK] Senha enviada com sucesso.")
+    clique_seguro(ok_pos)
 
-# ==================================================
-# FLUXO ACEITAR
-# ==================================================
-
-def flujo_aceitar():
-    print("[INFO] Entrando no fluxo aceitar")
+def fluxo_aceitar():
     while True:
         erro = localizar("erro.png")
         if erro:
-            print("[ERRO] Popup detectado! Clicando na imagem do erro...")
-            clique_seguro(erro, coordenada_backup=COORDS_BACKUP["ERRO"])
-            time.sleep(0.05)
+            clique_seguro(erro)
+            time.sleep(0.1)
 
         fim = localizar("fim.png")
         if fim:
-            print("[OK] fim.png encontrado! Iniciando partida...")
-            subprocess.Popen([sys.executable, "in_game.py"])
+            caminho_game = "in_game.exe"
+            if os.path.exists(caminho_game):
+                subprocess.Popen([caminho_game], startupinfo=OOCULTAR_PROMPT)
+            else:
+                subprocess.Popen([sys.executable, "in_game.py"], startupinfo=OOCULTAR_PROMPT)
             return
 
-        time.sleep(0.05)
-
-# ==================================================
-# BUSCA DE LOBBY
-# ==================================================
+        time.sleep(0.1)
 
 def etapa_lobby():
-    esperar("200.png")
-    print("[INFO] Iniciando busca automatizada por lobby...")
-
+    if not esperar("200.png", timeout=30):
+        pass
+        
     dentro_da_sala = False
 
     while True:
-        # 1. TRATAMENTO DE ERRO (Prioridade Máxima)
         erro = localizar("erro.png")
         if erro:
-            print("[ERRO] Popup detectado! Fechando...")
-            clique_seguro(erro, coordenada_backup=COORDS_BACKUP["ERRO"], pausa_antes=0.1)
+            clique_seguro(erro, pausa_antes=0.1)
             time.sleep(0.3)
             dentro_da_sala = False
             
-            # Força o clique no atualizar para limpar o estado visual
-            att_pos = localizar("att.png")
-            clique_seguro(att_pos, coordenada_backup=COORDS_BACKUP["ATT"], pausa_antes=0.1)
-            time.sleep(0.6)
+            clique_seguro(localizar("att.png"), pausa_antes=0.1)
             continue
 
-        # 2. ACEITAR
         aceitar = localizar("aceitar.png")
         if aceitar:
-            print("[OK] ACEITAR encontrado! Entrando no fluxo de confirmação...")
-            clique_seguro(aceitar, coordenada_backup=COORDS_BACKUP["OK"])
-            flujo_aceitar()
+            clique_seguro(aceitar)
+            fluxo_aceitar()
             return
 
         if dentro_da_sala:
-            print("[INFO] Já estamos dentro da sala. Aguardando o host iniciar...")
-            time.sleep(0.2)
+            time.sleep(0.3)
             if not localizar("sala.png"):
-                print("[AVISO] Sala sumiu ou fomos kickados. Resetando busca...")
                 dentro_da_sala = False
             continue
 
-        # 3. VERIFICAÇÃO SE ENTROU NA SALA
         if localizar("sala.png"):
-            print("[OK] Imagem SALA detectada! Congelando cliques de busca.")
             dentro_da_sala = True
             continue
 
-        # 4. ENTRAR NO JOGO (GAME)
         game = localizar("game.png", confidence=0.90)
         if game:
-            print("[OK] GAME encontrado! Executando clique...")
-            clique_seguro(game, coordenada_backup=COORDS_BACKUP["GAME"])
-            
-            print("[INFO] Executando segundo clique de garantia...")
-            pyautogui.click()
+            clique_seguro(game)
+            time.sleep(0.2)
+            pyautogui.click()  
             time.sleep(0.5)
             continue
 
-        # 5. ATUALIZAR (ATT)
-        print("[INFO] Atualizando lista de salas (ATT)...")
         att_pos = localizar("att.png")
-        clique_seguro(att_pos, coordenada_backup=COORDS_BACKUP["ATT"], pausa_antes=0.1)
-        time.sleep(0.6)
+        if att_pos:
+            clique_seguro(att_pos, pausa_antes=0.1)
+        time.sleep(0.3)
 
 # ==================================================
-# MAIN
+# EXECUÇÃO PRINCIPAL
 # ==================================================
 
 def executar():
