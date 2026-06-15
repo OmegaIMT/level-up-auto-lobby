@@ -32,7 +32,13 @@ CLICK_PAUSE    = 0.03   # pausa antes de cada clique
 FOCUS_WAIT     = 0.8    # tempo para o Windows processar foco
 ATT_CYCLE_WAIT = 0.6    # espera após cada clique em ATT antes de checar
 
-IMG_DIR        = "img"
+LANGUAGE = os.environ.get("LANGUAGE_GLOBAL", "pt-br")
+
+IMG_DIR = os.path.join(
+    "language",
+    LANGUAGE,
+    "lobby"
+)
 CACHE_FILE     = "coords_cache.txt"
 CACHE_MARGIN   = 60     # px ao redor da coord salva para a região de busca rápida
 
@@ -255,13 +261,23 @@ def step_menu() -> None:
 
     while True:
         focus_dota()
+
         if locate("lista.png"):
             break
+
         safe_click(locate("image.png"))
         time.sleep(0.5)
 
     safe_click(locate("lista.png"))
-    time.sleep(0.8)
+    time.sleep(0.5)
+
+    # Opcional
+    sair = wait_for("sair.png", timeout=3)
+
+    if sair:
+        safe_click(sair)
+        time.sleep(0.5)
+
     safe_click(wait_for("lobby.png"), pause=0.4)
 
 def step_password() -> None:

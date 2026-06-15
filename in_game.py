@@ -26,7 +26,9 @@ HIDDEN_WINDOW.wShowWindow = 0
 # ==================================================
 # CONFIG
 # ==================================================
-IMG_DIR = "in_game"
+LANGUAGE = os.environ.get("LANGUAGE_GLOBAL", "pt-br")
+
+IMG_DIR = os.path.join("language", LANGUAGE, "in_game")
 CACHE_FILE = "coords_cache_ingame.txt"  # cache separado do lobby
 CACHE_MARGIN = 60  # px ao redor da coord salva
 
@@ -185,72 +187,43 @@ def wait_for(
 # ==================================================
 def disconnect_and_relaunch() -> None:
     """
-    Desconecta da partida usando imagens com cache.
-    dc.png  → primeiro clique de saída (era DC_TOP_LEFT hardcoded)
-    dc2.png → segundo clique
-    dc3.png → terceiro clique (aguarda até 15s)
-    fechar.png / sim.png → confirmações finais
+    Fecha o Dota diretamente e relança o lobby.
     """
-    # Primeiro clique: dc.png (era hardcoded como DC_TOP_LEFT)
-    dc = wait_for("dc.png", timeout=5)
-    if dc:
-        click_pos(dc, delay_after=1.5)
-    else:
-        return  # não achou o menu — aborta para evitar cliques errados
 
-    dc2 = wait_for("dc2.png", timeout=5)
-    if dc2:
-        click_pos(dc2, delay_after=0.5)
+    try:
+        if sys.platform == "win32":
 
-    dc3 = wait_for("dc3.png", timeout=15)
-    if dc3:
-        click_pos(dc3, delay_after=2.5)
+            # Fecha o Dota 2
+            os.system("taskkill /f /im dota2.exe >nul 2>&1")
 
-    fechar = wait_for("fechar.png", timeout=5)
-    if fechar:
-        click_pos(fechar, delay_after=1.5)
+            # Alguns builds usam dota2.exe filho do steam
+            time.sleep(3)
 
-    sim = wait_for("sim.png", timeout=5)
-    if sim:
-        click_pos(sim, delay_after=1.5)
+    except Exception:
+        pass
 
     pw_atual = os.environ.get("PW_GLOBAL", "")
+
     if os.path.exists("lobby.exe"):
-        subprocess.Popen(["lobby.exe", pw_atual], startupinfo=HIDDEN_WINDOW)
+        subprocess.Popen(
+            ["lobby.exe", pw_atual],
+            startupinfo=HIDDEN_WINDOW
+        )
     else:
         subprocess.Popen(
-            [sys.executable, "lobby.py", pw_atual], startupinfo=HIDDEN_WINDOW
+            [sys.executable, "lobby.py", pw_atual],
+            startupinfo=HIDDEN_WINDOW
         )
 
     os._exit(0)
 
 
 # ==================================================
-# BONUS CHECK
-# ==================================================
-def check_bonus() -> bool:
-    """
-    Busca bonus.png por até 60s (4 x 15s) sempre em full-screen —
-    o popup pode aparecer em qualquer lugar da tela.
-    Após clicar, move o mouse para o centro para não obstruir o jogo.
-    """
-    for _ in range(4):
-        # Full-screen direto, sem cache — posição do bonus varia
-        pos = _locate_raw("bonus.png", confidence=0.85)
-        if pos:
-            click_pos(pos, 1.0)
-            cx = pyautogui.size().width // 2
-            cy = pyautogui.size().height // 2
-            pyautogui.moveTo(cx, cy)
-            return True
-        time.sleep(15.0)
-    return False
-
-
-# ==================================================
 # MAIN MONITOR
 # ==================================================
 def monitor_match() -> None:
+    bonus_deadline = time.time() + 60
+    bonus_clicado = False
     global PARTIDAS_CONCLUIDAS, CICLOS_FEITOS
 
     count_ever_seen = False
@@ -258,7 +231,19 @@ def monitor_match() -> None:
     last_seen_time = time.time()
 
     while True:
-        pos_count = locate("count.png")
+        if not bonus_clicado and time.time() < bonus_deadline:
+            bonus = _locate_raw("bonus.png", confidence=0.85)
+
+            if bonus:
+                click_pos(bonus, 1.0)
+
+                cx = pyautogui.size().width // 2
+                cy = pyautogui.size().height // 2
+
+                pyautogui.moveTo(cx, cy)
+
+                bonus_clicado = True
+            pos_count = locate("count.png")
 
         if pos_count:
             if not count_ever_seen:
@@ -313,6 +298,4 @@ if __name__ == "__main__":
     _cache_load()
 
     save_status(PARTIDAS_CONCLUIDAS, REHOST_MAX, CICLOS_FEITOS)
-
-    check_bonus()
     monitor_match()

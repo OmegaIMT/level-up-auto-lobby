@@ -1,0 +1,5 @@
+venv/
+.venv/
+coords_cache_ingame.txt
+coords_cache.txt
+panel_status.txt

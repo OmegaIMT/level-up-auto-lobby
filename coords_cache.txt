@@ -4,6 +4,6 @@ image.png:1128:31
 lista.png:881:87
 lobby.png:916:833
 ok.png:1009:606
-buscar.png:475:833
+buscar.png:395:833
 200.png:374:162
 att.png:1581:169
