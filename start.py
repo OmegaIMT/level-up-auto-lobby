@@ -4,113 +4,143 @@ import subprocess
 import tkinter as tk
 from tkinter import ttk
 
-# Ocultação do prompt atual
+# ==================================================
+# HIDE CONSOLE
+# ==================================================
 if sys.platform == "win32":
     import ctypes
     hWnd = ctypes.WinDLL('kernel32').GetConsoleWindow()
     if hWnd:
-        ctypes.WinDLL('user32').ShowWindow(hWnd, 0) # SW_HIDE
+        ctypes.WinDLL('user32').ShowWindow(hWnd, 0)
 
-OOCULTAR_PROMPT = subprocess.STARTUPINFO()
-OOCULTAR_PROMPT.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-OOCULTAR_PROMPT.wShowWindow = 0
+HIDDEN_WINDOW = subprocess.STARTUPINFO()
+HIDDEN_WINDOW.dwFlags     |= subprocess.STARTF_USESHOWWINDOW
+HIDDEN_WINDOW.wShowWindow  = 0
 
-processo_lobby = None
-processo_painel = None # Nova referência para o painel
+STATUS_FILE = "panel_status.txt"
 
-def atualizar_painel_txt(partidas, max_rehost, ciclos):
-    """Escreve os dados de forma ultra leve no arquivo para o painel ler."""
+processo_lobby  = None
+processo_painel = None
+
+# ==================================================
+# HELPERS
+# ==================================================
+def save_status(partidas: int, rehost_max: int, ciclos: int):
     try:
-        with open("panel_status.txt", "w") as f:
-            f.write(f"{partidas}\n{max_rehost}\n{ciclos}")
+        with open(STATUS_FILE, "w") as f:
+            f.write(f"{partidas}\n{rehost_max}\n{ciclos}")
     except Exception:
         pass
 
-def encerrar_tudo():
+def kill_all_children():
     global processo_lobby, processo_painel
-    print("[INFO] Fechando interface principal. Limpando processos...")
-    
-    # Fecha o Lobby
-    if processo_lobby and processo_lobby.poll() is None:
-        try:
-            processo_lobby.terminate()
-        except Exception:
-            pass
+    for proc in (processo_lobby, processo_painel):
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+    if sys.platform == "win32":
+        for target in ["lobby.exe", "in_game.exe", "painel.exe"]:
+            os.system(f'taskkill /f /im {target} >nul 2>&1')
+        for script in ["lobby.py", "in_game.py", "painel.py"]:
+            os.system(f'wmic process where "commandline like \'%{script}%\'" delete >nul 2>&1')
 
-    # Fecha o Painel
-    if processo_painel and processo_painel.poll() is None:
-        try:
-            processo_painel.terminate()
-        except Exception:
-            pass
-
-    # Força a limpeza geral no Windows por garantia
-    try:
-        if sys.platform == "win32":
-            os.system("taskkill /f /im lobby.exe >nul 2>&1")
-            os.system("taskkill /f /im in_game.exe >nul 2>&1")
-            os.system("taskkill /f /im painel.exe >nul 2>&1")
-    except Exception:
-        pass
-
+def on_close():
+    kill_all_children()
     root.destroy()
     os._exit(0)
 
-def iniciar_lobby():
+# ==================================================
+# MONITOR DE PROCESSOS  ← novo
+# ==================================================
+def watch_processes():
+    """
+    Roda a cada 1s via root.after.
+    Se o processo lobby morreu (por ESC, crash ou fim normal),
+    reabilita o botão Start e reseta o label de status.
+    """
+    global processo_lobby
+
+    if processo_lobby is not None:
+        exit_code = processo_lobby.poll()   # None = ainda vivo
+        if exit_code is not None:
+            # Processo morreu — independente do motivo
+            processo_lobby = None
+            btn_start.config(state="normal")
+            label_status.config(
+                text=f"Encerrado (código {exit_code}). Pronto para reiniciar.",
+                foreground="gray"
+            )
+
+    root.after(1000, watch_processes)   # agenda próxima verificação
+
+# ==================================================
+# ACTIONS
+# ==================================================
+def start():
     global processo_lobby, processo_painel
-    
-    pw = entry_pw.get().strip()
-    re_host = entry_rehost.get().strip()
 
-    if not re_host:
-        re_host = "1"
+    pw     = entry_pw.get().strip()
+    rehost = entry_rehost.get().strip() or "1"
 
-    # Define os estados iniciais no ambiente do Windows
-    os.environ["RE_HOST_GLOBAL"] = re_host
-    os.environ["PW_GLOBAL"] = pw
+    if not rehost.isdigit() or int(rehost) < 1:
+        label_status.config(text="Re-Host deve ser um número ≥ 1", foreground="red")
+        return
+
+    os.environ["PW_GLOBAL"]                  = pw
+    os.environ["RE_HOST_GLOBAL"]             = rehost
     os.environ["PARTIDAS_CONCLUIDAS_GLOBAL"] = "0"
-    if "CICLOS_GLOBAL" not in os.environ:
-        os.environ["CICLOS_GLOBAL"] = "0"
+    os.environ["CICLOS_GLOBAL"]              = "0"
 
-    # AJUSTE AQUI: Cria/limpa o arquivo txt com os dados iniciais corretos assim que clica em Start
-    atualizar_painel_txt("0", re_host, "0")
+    save_status(0, int(rehost), 0)
 
-    # 1. INICIA O LOBBY (Com prompt ocultado)
-    caminho_lobby = "lobby.exe"
-    if os.path.exists(caminho_lobby):
-        processo_lobby = subprocess.Popen([caminho_lobby, pw], startupinfo=OOCULTAR_PROMPT)
+    if os.path.exists("lobby.exe"):
+        processo_lobby = subprocess.Popen(["lobby.exe", pw], startupinfo=HIDDEN_WINDOW)
     else:
-        processo_lobby = subprocess.Popen([sys.executable, "lobby.py", pw], startupinfo=OOCULTAR_PROMPT)
-    
-    # 2. INICIA O PAINEL OVERLAY (Com prompt ocultado)
-    caminho_painel = "painel.exe"
-    if os.path.exists(caminho_painel):
-        processo_painel = subprocess.Popen([caminho_painel], startupinfo=OOCULTAR_PROMPT)
+        processo_lobby = subprocess.Popen(
+            [sys.executable, "lobby.py", pw], startupinfo=HIDDEN_WINDOW
+        )
+
+    if os.path.exists("painel.exe"):
+        processo_painel = subprocess.Popen(["painel.exe"], startupinfo=HIDDEN_WINDOW)
     else:
-        processo_painel = subprocess.Popen([sys.executable, "painel.py"], startupinfo=OOCULTAR_PROMPT)
+        processo_painel = subprocess.Popen(
+            [sys.executable, "painel.py"], startupinfo=HIDDEN_WINDOW
+        )
 
-    print("[INFO] Processos Iniciados. Minimizando a janela start...")
-    root.iconify()
+    btn_start.config(state="disabled")
+    label_status.config(text="Iniciado! Minimizando...", foreground="green")
+    root.after(1200, root.iconify)
 
+# ==================================================
+# UI
+# ==================================================
 if __name__ == "__main__":
     root = tk.Tk()
-    root.title("Configuração")
-    root.geometry("300x220")
+    root.title("Bot Config")
+    root.geometry("300x240")
     root.resizable(False, False)
-
-    root.protocol("WM_DELETE_WINDOW", encerrar_tudo)
+    root.protocol("WM_DELETE_WINDOW", on_close)
 
     frame = ttk.Frame(root, padding=15)
     frame.pack(fill="both", expand=True)
 
-    ttk.Label(frame, text="PW").pack(anchor="w")
-    entry_pw = ttk.Entry(frame, width=30)
+    ttk.Label(frame, text="Senha (PW)").pack(anchor="w")
+    entry_pw = ttk.Entry(frame, width=30, show="")
     entry_pw.pack(fill="x", pady=(0, 10))
 
-    ttk.Label(frame, text="Re-Host (Número)").pack(anchor="w")
+    ttk.Label(frame, text="Re-Host (partidas por ciclo)").pack(anchor="w")
     entry_rehost = ttk.Entry(frame, width=30)
-    entry_rehost.pack(fill="x", pady=(0, 15))
+    entry_rehost.pack(fill="x", pady=(0, 10))
 
-    ttk.Button(frame, text="Start", command=iniciar_lobby).pack(fill="x")
+    btn_start = ttk.Button(frame, text="Start", command=start)
+    btn_start.pack(fill="x", pady=(5, 0))
+
+    label_status = ttk.Label(frame, text="", foreground="gray")
+    label_status.pack(pady=(8, 0))
+
+    # Inicia o monitor de processos imediatamente
+    watch_processes()
 
     root.mainloop()

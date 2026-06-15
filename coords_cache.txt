@@ -1,0 +1,8 @@
+aceitar.png:959:510
+fim.png:958:763
+image.png:1128:31
+lista.png:881:87
+lobby.png:916:833
+ok.png:1009:606
+200.png:374:162
+att.png:1581:169
