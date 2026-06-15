@@ -1,19 +1,25 @@
 import os
 import sys
+import threading
 import tkinter as tk
+import keyboard
 
-STATUS_FILE  = "panel_status.txt"
+STATUS_FILE   = "panel_status.txt"
 POLL_INTERVAL = 800   # ms
 
-_last_mtime: float = 0.0   # evita re-parse quando o arquivo não mudou
+_last_mtime: float = 0.0
+
+def _watch_esc() -> None:
+    keyboard.add_hotkey("esc", lambda: os._exit(0), suppress=False)
+    # Mantém a thread viva para o hotkey continuar registrado
+    threading.Event().wait()
 
 def read_status() -> tuple[str, str, str] | None:
-    """Lê o arquivo só se foi modificado desde a última leitura."""
     global _last_mtime
     try:
         mtime = os.path.getmtime(STATUS_FILE)
         if mtime == _last_mtime:
-            return None   # nada mudou
+            return None
         _last_mtime = mtime
 
         with open(STATUS_FILE, "r") as f:
@@ -25,26 +31,23 @@ def read_status() -> tuple[str, str, str] | None:
         pass
     return None
 
-def poll():
-    """Callback recorrente — atualiza UI apenas se o arquivo mudou."""
+def poll() -> None:
     result = read_status()
     if result:
         partidas, max_rehost, ciclos = result
         label_rehost.config(text=f"re-host = {partidas}/{max_rehost}")
         label_ciclos.config(text=f"ciclos  = {ciclos}")
     elif not os.path.exists(STATUS_FILE):
-        # Arquivo sumiu — indica perda de sinal
         label_rehost.config(text="re-host = --/--")
         label_ciclos.config(text="ciclos  = --")
 
     root.after(POLL_INTERVAL, poll)
 
-def make_click_through(window: tk.Tk):
-    """Torna a janela transparente a cliques do mouse (apenas Windows)."""
+def make_click_through(window: tk.Tk) -> None:
     if sys.platform != "win32":
         return
     import ctypes
-    GWL_EXSTYLE      = -20
+    GWL_EXSTYLE       = -20
     WS_EX_TRANSPARENT = 0x00000020
     WS_EX_LAYERED     = 0x00080000
 
@@ -54,6 +57,8 @@ def make_click_through(window: tk.Tk):
     user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_TRANSPARENT | WS_EX_LAYERED)
 
 if __name__ == "__main__":
+    threading.Thread(target=_watch_esc, daemon=True).start()
+
     root = tk.Tk()
     root.title("Painel Overlay")
     root.overrideredirect(True)

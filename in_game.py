@@ -137,6 +137,10 @@ def check_bonus() -> bool:
         pos = locate("bonus.png")
         if pos:
             click_pos(pos, delay_after=1.0)
+            # Move para o centro da tela para não obstruir a visão do jogo
+            cx = pyautogui.size().width  // 2
+            cy = pyautogui.size().height // 2
+            pyautogui.moveTo(cx, cy)
             return True
         time.sleep(15.0)
     return False

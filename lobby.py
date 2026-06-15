@@ -36,7 +36,16 @@ IMG_DIR        = "img"
 CACHE_FILE     = "coords_cache.txt"
 CACHE_MARGIN   = 60     # px ao redor da coord salva para a região de busca rápida
 
-PW = os.environ.get("PW_GLOBAL", sys.argv[1] if len(sys.argv) > 1 else "4433")
+PW         = os.environ.get("PW_GLOBAL",         sys.argv[1] if len(sys.argv) > 1 else "4433")
+LOBBY_NAME = os.environ.get("LOBBY_NAME_GLOBAL", sys.argv[2] if len(sys.argv) > 2 else "")
+LOCK_FILE  = "bot.lock"   # sentinela compartilhado com painel.py
+
+def _delete_lock() -> None:
+    try:
+        if os.path.exists(LOCK_FILE):
+            os.remove(LOCK_FILE)
+    except Exception:
+        pass
 
 # ==================================================
 # PYAUTOGUI CONFIG
@@ -49,6 +58,7 @@ pyautogui.FAILSAFE = True
 # ==================================================
 def _watch_esc() -> None:
     keyboard.wait("esc")
+    _delete_lock()
     print("\a")
     os._exit(1)
 
@@ -211,6 +221,34 @@ def open_dota() -> None:
     except Exception:
         os._exit(1)
 
+def step_lobby_name() -> None:
+    """
+    Digita o nome do lobby no campo 'Buscar salas'.
+
+    Na primeira execução: locate() faz full-screen scan com confidence=0.60
+    (baixo para achar o campo mesmo com texto dentro) e salva a coord no cache.
+    Nas próximas: vai direto na região salva — funciona em qualquer resolução
+    pois a coord é aprendida na primeira vez, não hardcoded.
+    """
+    if not LOBBY_NAME:
+        return
+
+    buscar = wait_for("buscar.png", confidence=0.60, timeout=10)
+    if not buscar:
+        return
+
+    safe_click(buscar, pause=0.3)
+    time.sleep(0.2)
+
+    # Seleciona tudo e apaga — funciona com ou sem texto no campo
+    pyautogui.hotkey("ctrl", "a")
+    time.sleep(0.05)
+    pyautogui.press("delete")
+    time.sleep(0.1)
+
+    pyautogui.write(LOBBY_NAME, interval=0.05)
+    time.sleep(0.3)   # aguarda a lista filtrar antes de ir para ATT
+
 def step_menu() -> None:
     if not os.path.exists(IMG_DIR):
         os._exit(1)
@@ -360,6 +398,7 @@ def step_lobby() -> None:
                 _restart_dota()
                 step_menu()
                 step_password()
+                step_lobby_name()
                 inside_room = False
                 continue
 
@@ -372,6 +411,7 @@ def step_lobby() -> None:
                 _restart_dota()
                 step_menu()
                 step_password()
+                step_lobby_name()
                 inside_room = False
                 continue
 
@@ -416,6 +456,7 @@ def step_lobby() -> None:
             _restart_dota()
             step_menu()
             step_password()
+            step_lobby_name()
 
         elif result == _ROOM_RESULT_SALA:
             inside_room = True
@@ -430,6 +471,7 @@ def step_lobby() -> None:
                 _restart_dota()
                 step_menu()
                 step_password()
+                step_lobby_name()
 
 # ==================================================
 # ENTRY POINT
@@ -441,7 +483,10 @@ def main() -> None:
     open_dota()
     step_menu()
     step_password()
+    step_lobby_name()   # após a senha — campo de busca já está disponível
     step_lobby()
+
+    _delete_lock()
 
 if __name__ == "__main__":
     main()
