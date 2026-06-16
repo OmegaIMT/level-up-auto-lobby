@@ -171,9 +171,16 @@ def start() -> None:
 if __name__ == "__main__":
 
     root = tk.Tk()
-    root.title("Bot Config")
-    root.geometry("320x340")
+    root.title("Auto Lobby Level Up") # NOME ALTERADO PARA O NOME DO PROJETO
+    root.geometry("320x370") # Ajustado levemente para caber o rodapé da empresa sem espremer
     root.resizable(False, False)
+
+    # DEFINIÇÃO DO ÍCONE DA JANELA (Busca o ícone na raiz do projeto)
+    if os.path.exists("level-up.ico"):
+        try:
+            root.iconbitmap("level-up.ico")
+        except Exception:
+            pass
 
     root.protocol("WM_DELETE_WINDOW", on_close)
 
@@ -221,8 +228,16 @@ if __name__ == "__main__":
         text="",
         foreground="gray",
     )
+    label_status.pack(pady=(5, 0))
 
-    label_status.pack(pady=(8, 0))
+    # ASSINATURA DA EMPRESA (Bastos Develop - 2026)
+    label_footer = ttk.Label(
+        frame,
+        text="© 2026 Bastos Develop. Todos os direitos reservados.",
+        font=("Arial", 7),
+        foreground="gray",
+    )
+    label_footer.pack(side="bottom", pady=(10, 0))
 
     watch_processes()
 
