@@ -1,48 +1,136 @@
 import os
 import sys
+import json
+import time
 import threading
 import tkinter as tk
 import keyboard
 
 
-STATUS_FILE   = "panel_status.txt"
+CONFIG_FILE  = "config.json"   # gerado pelo start.py — usado só para ler o idioma
+STATUS_FILE  = "status.json"   # atualizado ao vivo pelo lobby.py
 POLL_INTERVAL = 800   # ms
 
-_last_mtime: float = 0.0
+LANGUAGES = {
+    "Português (Brasil)": "pt-br",
+    "English": "en-us",
+    "Русский": "ru",
+    "中文": "zh-cn",
+}
+
+DEFAULT_LANGUAGE = "pt-br"
+
+# Textos default (usados se o painel.json do idioma não existir ou faltar uma chave)
+TEXT_DEFAULTS = {
+    "rehost_label": "re-host",
+    "ciclos_label": "ciclos",
+    "password_label": "senha",
+    "next_password_label": "troca em",
+    "no_data": "--",
+}
+
+TEXT: dict = {}
+
+_last_status_mtime: float = 0.0
+_last_status: dict = {}
+
+
+def _load_language() -> str:
+    """Lê o idioma salvo pelo start.py no config.json."""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("language", DEFAULT_LANGUAGE)
+        except Exception:
+            pass
+    return DEFAULT_LANGUAGE
+
+
+def load_panel_texts(language_folder: str) -> None:
+    """Carrega language/<idioma>/painel.json, com fallback para os defaults."""
+    global TEXT
+    TEXT = dict(TEXT_DEFAULTS)
+    path = os.path.join("language", language_folder, "painel.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            dados = json.load(f)
+            if isinstance(dados, dict):
+                TEXT.update(dados)
+    except Exception as e:
+        print(f"Erro ao carregar painel.json ({language_folder}): {e}")
+
 
 def _watch_esc() -> None:
     keyboard.add_hotkey("esc", lambda: os._exit(0), suppress=False)
     # Mantém a thread viva para o hotkey continuar registrado
     threading.Event().wait()
 
-def read_status() -> tuple[str, str, str] | None:
-    global _last_mtime
+
+def read_status() -> dict | None:
+    """
+    Lê status.json se o arquivo mudou desde a última leitura.
+    Retorna None se não mudou ou se houve erro (mantém o último valor exibido).
+    """
+    global _last_status_mtime, _last_status
     try:
         mtime = os.path.getmtime(STATUS_FILE)
-        if mtime == _last_mtime:
+        if mtime == _last_status_mtime:
             return None
-        _last_mtime = mtime
+        _last_status_mtime = mtime
 
-        with open(STATUS_FILE, "r") as f:
-            lines = f.read().splitlines()
+        with open(STATUS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-        if len(lines) >= 3:
-            return lines[0].strip(), lines[1].strip(), lines[2].strip()
+        if isinstance(data, dict):
+            _last_status = data
+            return data
     except Exception:
         pass
     return None
 
+
+def _format_countdown(seconds_left: float) -> str:
+    if seconds_left <= 0:
+        return TEXT.get("no_data", "--")
+    total = int(seconds_left)
+    minutes, secs = divmod(total, 60)
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def render(status: dict) -> None:
+    partidas   = status.get("partidas", 0)
+    rehost_max = status.get("rehost_max", 0)
+    ciclos     = status.get("ciclos", 0)
+    current_pw = status.get("current_password", "") or TEXT.get("no_data", "--")
+
+    label_rehost.config(text=f"{TEXT.get('rehost_label', 're-host')} = {partidas}/{rehost_max}")
+    label_ciclos.config(text=f"{TEXT.get('ciclos_label', 'ciclos')}  = {ciclos}")
+    label_password.config(text=f"{TEXT.get('password_label', 'senha')}: {current_pw}")
+
+
+def tick_countdown() -> None:
+    """Atualiza a contagem regressiva a cada segundo, independente do poll do status.json."""
+    deadline = _last_status.get("password_deadline", 0.0) or 0.0
+    seconds_left = deadline - time.time() if deadline else 0.0
+    label_next_password.config(
+        text=f"{TEXT.get('next_password_label', 'troca em')}: {_format_countdown(seconds_left)}"
+    )
+    root.after(1000, tick_countdown)
+
+
 def poll() -> None:
     result = read_status()
     if result:
-        partidas, max_rehost, ciclos = result
-        label_rehost.config(text=f"re-host = {partidas}/{max_rehost}")
-        label_ciclos.config(text=f"ciclos  = {ciclos}")
+        render(result)
     elif not os.path.exists(STATUS_FILE):
-        label_rehost.config(text="re-host = --/--")
-        label_ciclos.config(text="ciclos  = --")
+        no_data = TEXT.get("no_data", "--")
+        label_rehost.config(text=f"{TEXT.get('rehost_label', 're-host')} = {no_data}/{no_data}")
+        label_ciclos.config(text=f"{TEXT.get('ciclos_label', 'ciclos')}  = {no_data}")
+        label_password.config(text=f"{TEXT.get('password_label', 'senha')}: {no_data}")
 
     root.after(POLL_INTERVAL, poll)
+
 
 def make_click_through(window: tk.Tk) -> None:
     if sys.platform != "win32":
@@ -57,8 +145,12 @@ def make_click_through(window: tk.Tk) -> None:
     style  = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
     user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_TRANSPARENT | WS_EX_LAYERED)
 
+
 if __name__ == "__main__":
     threading.Thread(target=_watch_esc, daemon=True).start()
+
+    language_folder = _load_language()
+    load_panel_texts(language_folder)
 
     root = tk.Tk()
     root.title("Painel Overlay")
@@ -67,7 +159,7 @@ if __name__ == "__main__":
     root.wm_attributes("-alpha", 0.80)
     root.configure(bg="black")
 
-    largura, altura = 170, 55
+    largura, altura = 200, 85
     pos_x = root.winfo_screenwidth() - largura - 20
     root.geometry(f"{largura}x{altura}+{pos_x}+20")
 
@@ -80,10 +172,19 @@ if __name__ == "__main__":
 
     label_ciclos = tk.Label(root, text="ciclos  = 0", fg=COLOR, bg="black",
                             font=FONT, anchor="w")
-    label_ciclos.pack(fill="x", padx=10, pady=(0, 5))
+    label_ciclos.pack(fill="x", padx=10, pady=(0, 0))
+
+    label_password = tk.Label(root, text="senha: --", fg=COLOR, bg="black",
+                            font=FONT, anchor="w")
+    label_password.pack(fill="x", padx=10, pady=(0, 0))
+
+    label_next_password = tk.Label(root, text="troca em: --", fg=COLOR, bg="black",
+                            font=FONT, anchor="w")
+    label_next_password.pack(fill="x", padx=10, pady=(0, 5))
 
     root.update()
     make_click_through(root)
 
     poll()
+    tick_countdown()
     root.mainloop()

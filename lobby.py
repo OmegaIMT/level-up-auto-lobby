@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import json
 import threading
 import subprocess
 import pyautogui
@@ -31,20 +32,181 @@ POLL_ATT       = 0.02   # intervalo entre cliques no botão de atualizar
 CLICK_PAUSE    = 0.03   # pausa antes de cada clique
 FOCUS_WAIT     = 0.8    # tempo para o Windows processar foco
 ATT_CYCLE_WAIT = 0.6    # espera após cada clique em ATT antes de checar
+MENU_STEP_WAIT = 0.25   # pausa entre cliques no menu (era 0.5 — reduzida pela metade)
+SAIR_TIMEOUT   = 1.5    # timeout do popup opcional "sair" (era 3 — reduzido pela metade)
 
-LANGUAGE = os.environ.get("LANGUAGE_GLOBAL", "pt-br")
+# ==================================================
+# SESSION CONFIG (gerado pelo start.py)
+# ==================================================
+SESSION_CONFIG_FILE = sys.argv[1] if len(sys.argv) > 1 else "config.json"
+LOBBY_CONFIG_FILE    = "lobby_config.json"   # estado persistente do bot (senha que funcionou, coords)
+STATUS_FILE          = "status.json"         # status ao vivo, lido pelo painel.py
+LOCK_FILE            = "bot.lock"            # sentinela compartilhado com painel.py
 
-IMG_DIR = os.path.join(
-    "language",
-    LANGUAGE,
-    "lobby"
-)
+UP_PREFIX = "up-"   # sempre digitado no campo de busca, no lugar do antigo lobby_name
+
+
+def _load_session_config() -> dict:
+    """
+    Lê o config.json gerado pelo start.py.
+    Mantém fallback em env vars / argv para compatibilidade, caso o arquivo
+    não exista (execução manual do script, por exemplo).
+    """
+    if os.path.exists(SESSION_CONFIG_FILE):
+        try:
+            with open(SESSION_CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Erro ao ler {SESSION_CONFIG_FILE}: {e}")
+
+    # Fallback (compatibilidade com chamadas antigas)
+    return {
+        "passwords": [os.environ.get("PW_GLOBAL", sys.argv[2] if len(sys.argv) > 2 else "4433")],
+        "password_interval_minutes": 1,
+        "language": os.environ.get("LANGUAGE_GLOBAL", "pt-br"),
+    }
+
+
+def _load_lobby_state() -> dict:
+    """Lê o estado persistente do bot (última senha que funcionou)."""
+    if os.path.exists(LOBBY_CONFIG_FILE):
+        try:
+            with open(LOBBY_CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"last_working_password": "", "last_working_index": -1}
+
+
+def _save_lobby_state(state: dict) -> None:
+    try:
+        with open(LOBBY_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Erro ao salvar {LOBBY_CONFIG_FILE}: {e}")
+
+
+def _clear_lobby_state() -> None:
+    """Reseta a senha salva e o índice em uso (chamado no ESC)."""
+    _save_lobby_state({"last_working_password": "", "last_working_index": -1})
+
+
+_status_lock = threading.Lock()
+
+
+def _read_status_raw() -> dict:
+    """Lê o status.json atual do disco, sem cache. Usado para merge em save_status."""
+    if os.path.exists(STATUS_FILE):
+        try:
+            with open(STATUS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            pass
+    return {}
+
+
+_STATUS_DEFAULTS = {
+    "partidas": 0,
+    "rehost_max": 0,
+    "ciclos": 0,
+    "current_password": "",
+    "password_deadline": 0.0,
+}
+
+
+def save_status(
+    partidas: int | None = None,
+    rehost_max: int | None = None,
+    ciclos: int | None = None,
+    current_pw: str | None = None,
+    password_deadline: float | None = None,
+) -> None:
+    """
+    Atualiza o status.json lido pelo painel.py, fazendo MERGE com o que já
+    está em disco — cada chamada só sobrescreve os campos que recebeu
+    explicitamente (não-None), preservando os demais. Isso evita que uma
+    atualização parcial (ex: só current_pw e deadline ao trocar de senha)
+    apague campos como rehost_max que foram gravados em outro momento.
+
+    password_deadline é um timestamp epoch (time.time()) marcando quando a
+    troca de senha atual vai acontecer — o painel calcula a contagem
+    regressiva localmente (deadline - now), sem depender de sincronizar
+    contadores entre os dois processos.
+    """
+    with _status_lock:
+        current = _read_status_raw()
+        payload = {**_STATUS_DEFAULTS, **current}
+
+        if partidas is not None:
+            payload["partidas"] = partidas
+        if rehost_max is not None:
+            payload["rehost_max"] = rehost_max
+        if ciclos is not None:
+            payload["ciclos"] = ciclos
+        if current_pw is not None:
+            payload["current_password"] = current_pw
+        if password_deadline is not None:
+            payload["password_deadline"] = password_deadline
+
+        try:
+            with open(STATUS_FILE, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Erro ao salvar {STATUS_FILE}: {e}")
+
+
+SESSION = _load_session_config()
+LOBBY_STATE = _load_lobby_state()
+
+PASSWORDS: list[str] = [p for p in SESSION.get("passwords", []) if p] or ["4433"]
+PASSWORD_INTERVAL_SECONDS: float = max(1, SESSION.get("password_interval_minutes", 1)) * 60
+REHOST_MAX: int = SESSION.get("rehost_max", 1)
+LANGUAGE = SESSION.get("language", "pt-br")
+RESOLUTION = SESSION.get("resolution", "1920x1080")
+
+_IMG_DIR_WITH_RES = os.path.join("language", LANGUAGE, RESOLUTION, "lobby")
+_IMG_DIR_NO_RES    = os.path.join("language", LANGUAGE, "lobby")
+
+# Preferimos a pasta com resolução (language/{idioma}/{resolução}/lobby).
+# Se ela não existir no projeto, caímos para o formato antigo (sem resolução)
+# para não quebrar instalações existentes.
+IMG_DIR = _IMG_DIR_WITH_RES if os.path.exists(_IMG_DIR_WITH_RES) else _IMG_DIR_NO_RES
+
 CACHE_FILE     = "coords_cache.txt"
 CACHE_MARGIN   = 60     # px ao redor da coord salva para a região de busca rápida
 
-PW         = os.environ.get("PW_GLOBAL",         sys.argv[1] if len(sys.argv) > 1 else "4433")
-LOBBY_NAME = os.environ.get("LOBBY_NAME_GLOBAL", sys.argv[2] if len(sys.argv) > 2 else "")
-LOCK_FILE  = "bot.lock"   # sentinela compartilhado com painel.py
+# Se já existe uma senha marcada como "última que funcionou", começa por ela
+_start_index = LOBBY_STATE.get("last_working_index", -1)
+if 0 <= _start_index < len(PASSWORDS):
+    _password_cursor = _start_index
+else:
+    _password_cursor = 0
+
+_password_lock = threading.Lock()
+
+
+def current_password() -> str:
+    with _password_lock:
+        return PASSWORDS[_password_cursor]
+
+
+def advance_password() -> str:
+    """Avança para a próxima senha da lista (round-robin) e retorna a nova senha."""
+    global _password_cursor
+    with _password_lock:
+        _password_cursor = (_password_cursor + 1) % len(PASSWORDS)
+        return PASSWORDS[_password_cursor]
+
+
+def mark_password_working() -> None:
+    """Salva a senha atual como a última que funcionou (chamado ao aceitar um lobby)."""
+    with _password_lock:
+        idx = _password_cursor
+        pw = PASSWORDS[idx]
+    _save_lobby_state({"last_working_password": pw, "last_working_index": idx})
+
 
 def _delete_lock() -> None:
     try:
@@ -64,6 +226,8 @@ pyautogui.FAILSAFE = True
 # ==================================================
 def _watch_esc() -> None:
     keyboard.wait("esc")
+    _clear_lobby_state()
+    save_status(current_pw="", password_deadline=0.0)
     _delete_lock()
     print("\a")
     os._exit(1)
@@ -193,7 +357,7 @@ def locate(name: str, confidence: float = 0.80) -> Optional[tuple[int, int]]:
 def wait_for(
     name: str,
     confidence: float = 0.80,
-    timeout: int = 60,
+    timeout: float = 60,
 ) -> Optional[tuple[int, int]]:
     """Aguarda até `timeout` segundos que a imagem apareça."""
     deadline = time.time() + timeout
@@ -227,18 +391,18 @@ def open_dota() -> None:
     except Exception:
         os._exit(1)
 
-def step_lobby_name() -> None:
+def step_up_name() -> None:
     """
-    Digita o nome do lobby no campo 'Buscar salas'.
+    Digita o prefixo 'up-' no campo 'Buscar salas'.
+
+    Antes dependia de um nome de lobby configurável; agora sempre apaga o
+    que estiver no campo e digita o prefixo fixo UP_PREFIX ("up-").
 
     Na primeira execução: locate() faz full-screen scan com confidence=0.60
     (baixo para achar o campo mesmo com texto dentro) e salva a coord no cache.
     Nas próximas: vai direto na região salva — funciona em qualquer resolução
     pois a coord é aprendida na primeira vez, não hardcoded.
     """
-    if not LOBBY_NAME:
-        return
-
     buscar = wait_for("buscar.png", confidence=0.60, timeout=10)
     if not buscar:
         return
@@ -252,7 +416,7 @@ def step_lobby_name() -> None:
     pyautogui.press("delete")
     time.sleep(0.1)
 
-    pyautogui.write(LOBBY_NAME, interval=0.05)
+    pyautogui.write(UP_PREFIX, interval=0.05)
     time.sleep(0.3)   # aguarda a lista filtrar antes de ir para ATT
 
 def step_menu() -> None:
@@ -266,17 +430,17 @@ def step_menu() -> None:
             break
 
         safe_click(locate("image.png"))
-        time.sleep(0.5)
+        time.sleep(MENU_STEP_WAIT)
 
     safe_click(locate("lista.png"))
-    time.sleep(0.5)
+    time.sleep(MENU_STEP_WAIT)
 
     # Opcional
-    sair = wait_for("sair.png", timeout=3)
+    sair = wait_for("sair.png", timeout=SAIR_TIMEOUT)
 
     if sair:
         safe_click(sair)
-        time.sleep(0.5)
+        time.sleep(MENU_STEP_WAIT)
 
     safe_click(wait_for("lobby.png"), pause=0.4)
 
@@ -291,7 +455,7 @@ def step_password() -> None:
     time.sleep(0.1)
     pyautogui.press("backspace")
     time.sleep(0.1)
-    pyautogui.write(PW, interval=0.05)
+    pyautogui.write(current_password(), interval=0.05)
     time.sleep(0.2)
     safe_click(ok_pos)
 
@@ -315,6 +479,33 @@ def _restart_dota() -> None:
     open_dota()
     time.sleep(6.0)
 
+
+def _restart_with_next_password() -> None:
+    """
+    USADO SÓ EM ERRO DE VERDADE (erro.png detectado, falha após aceitar, etc).
+    Avança para a próxima senha da lista, mata e reabre o Dota, e refaz o
+    fluxo completo de entrada (menu → senha → prefixo up-).
+    """
+    advance_password()
+    _restart_dota()
+    step_menu()
+    step_password()
+    step_up_name()
+
+
+def _retry_with_next_password() -> None:
+    """
+    USADO QUANDO SÓ ESGOTA O TEMPO DE BUSCA (sem erro nenhum no Dota).
+    Não mata nem reabre o Dota — o jogo continua aberto, ainda na tela
+    de lista de lobbies. Reclica em lobby.png (que reabre o popup de
+    senha) e a partir daí repete o fluxo normal: step_password() para
+    digitar a nova senha e step_up_name() para o prefixo de busca.
+    """
+    advance_password()
+    safe_click(wait_for("lobby.png"), pause=0.4)
+    step_password()
+    step_up_name()
+
 # ==================================================
 # PÓS-CLIQUE EM LOBBY
 # ==================================================
@@ -322,7 +513,7 @@ _ROOM_RESULT_SALA    = "sala"
 _ROOM_RESULT_ACEITAR = "aceitar"
 _ROOM_RESULT_ERRO    = "erro"
 
-def _wait_after_room_click(timeout: int = 10) -> str:
+def _wait_after_room_click(timeout: float = 10) -> str:
     """
     Após o duplo-clique em um lobby, aguarda a resposta do Dota.
 
@@ -361,29 +552,58 @@ def _accept_loop() -> bool:
         time.sleep(POLL_FAST)
 
 # ==================================================
-# LOOP DE ATT INTELIGENTE
+# LOOP DE ATT INTELIGENTE (clicker + observer em paralelo)
 # ==================================================
-def _refresh_until_game_appears(max_attempts: int = 60) -> bool:
+def _refresh_until_game_appears(timeout_seconds: float) -> bool:
     """
-    Clica em ATT e verifica se game.png aparece.
-    O locate() já usa cache internamente — full-screen só na primeira vez.
+    Clica em ATT continuamente numa thread enquanto outra thread fica
+    só observando se game.png aparece — assim o clique nunca "rouba" o
+    timeslice que seria usado pra perceber o game.png a tempo.
 
-    Retorna True se game foi encontrado, False se esgotou tentativas.
+    Assim que o observer encontra game.png, sinaliza found_event e o
+    clicker para imediatamente (sem esperar o próximo ciclo de sleep).
+
+    Retorna True se game foi encontrado dentro do timeout, False caso
+    o tempo se esgote (sinal para trocar de senha).
     """
     att = locate("att.png")
     if not att:
         return False
 
-    for _ in range(max_attempts):
-        safe_click(att, pause=POLL_ATT)
-        time.sleep(ATT_CYCLE_WAIT)
+    deadline = time.time() + timeout_seconds
+    save_status(current_pw=current_password(), password_deadline=deadline)
 
-        if locate("game.png", confidence=0.90):
-            return True
+    found_event = threading.Event()
+    stop_event = threading.Event()
 
-        att = locate("att.png") or att
+    def _clicker() -> None:
+        current_att = att
+        while not stop_event.is_set() and not found_event.is_set():
+            safe_click(current_att, pause=POLL_ATT)
+            # espera curta e interrompível — não usamos time.sleep(ATT_CYCLE_WAIT)
+            # "cru" pra não atrasar a reação ao found_event
+            if found_event.wait(timeout=ATT_CYCLE_WAIT):
+                return
+            current_att = locate("att.png") or current_att
 
-    return False
+    def _observer() -> None:
+        while not stop_event.is_set():
+            if locate("game.png", confidence=0.90):
+                found_event.set()
+                return
+            time.sleep(POLL_FAST)
+
+    clicker_thread = threading.Thread(target=_clicker, daemon=True)
+    observer_thread = threading.Thread(target=_observer, daemon=True)
+    clicker_thread.start()
+    observer_thread.start()
+
+    found = found_event.wait(timeout=timeout_seconds)
+    stop_event.set()
+    clicker_thread.join(timeout=2)
+    observer_thread.join(timeout=2)
+
+    return found
 
 # ==================================================
 # STEP LOBBY
@@ -395,11 +615,22 @@ def step_lobby() -> None:
     Estados:
       searching → procurando o lobby na lista
       inside    → dentro da sala, aguardando aceitar/fim
+
+    Troca de senha:
+      - Se o intervalo de troca se esgota SEM achar sala (clicando em ATT),
+        NÃO reinicia o Dota: apenas avança para a próxima senha e repete
+        step_password() + step_up_name() (_retry_with_next_password).
+      - Se um ERRO de verdade é detectado (erro.png, falha após aceitar),
+        avança a senha E reinicia o Dota (_restart_with_next_password).
+      Ao aceitar um lobby com sucesso, a senha atual é salva como
+      "última que funcionou" em lobby_config.json.
     """
     lobby_ready = wait_for("200.png", timeout=30)
     if not lobby_ready:
         safe_click(locate("att.png"))
         time.sleep(1.0)
+
+    save_status(rehost_max=REHOST_MAX, current_pw=current_password())
 
     inside_room = False
 
@@ -411,23 +642,18 @@ def step_lobby() -> None:
             if err:
                 safe_click(err, pause=0.1)
                 time.sleep(0.2)
-                _restart_dota()
-                step_menu()
-                step_password()
-                step_lobby_name()
+                _restart_with_next_password()
                 inside_room = False
                 continue
 
             aceitar = locate("aceitar.png")
             if aceitar:
                 safe_click(aceitar)
+                mark_password_working()
                 completed = _accept_loop()
                 if completed:
                     return
-                _restart_dota()
-                step_menu()
-                step_password()
-                step_lobby_name()
+                _restart_with_next_password()
                 inside_room = False
                 continue
 
@@ -450,10 +676,13 @@ def step_lobby() -> None:
             inside_room = True
             continue
 
-        game_found = _refresh_until_game_appears(max_attempts=60)
+        game_found = _refresh_until_game_appears(timeout_seconds=PASSWORD_INTERVAL_SECONDS)
 
         if not game_found:
-            time.sleep(POLL_NORMAL)
+            # Esgotou o intervalo de senha sem achar sala — NÃO é erro,
+            # o Dota continua aberto. Só troca a senha no campo e segue
+            # clicando em ATT/buscando.
+            _retry_with_next_password()
             continue
 
         # Game encontrado → duplo-clique
@@ -469,10 +698,7 @@ def step_lobby() -> None:
 
         if result == _ROOM_RESULT_ERRO:
             safe_click(locate("erro.png"), pause=0.1)
-            _restart_dota()
-            step_menu()
-            step_password()
-            step_lobby_name()
+            _restart_with_next_password()
 
         elif result == _ROOM_RESULT_SALA:
             inside_room = True
@@ -481,13 +707,11 @@ def step_lobby() -> None:
             aceitar = locate("aceitar.png")
             if aceitar:
                 safe_click(aceitar)
+                mark_password_working()
                 completed = _accept_loop()
                 if completed:
                     return
-                _restart_dota()
-                step_menu()
-                step_password()
-                step_lobby_name()
+                _restart_with_next_password()
 
 # ==================================================
 # ENTRY POINT
@@ -499,7 +723,7 @@ def main() -> None:
     open_dota()
     step_menu()
     step_password()
-    step_lobby_name()   # após a senha — campo de busca já está disponível
+    step_up_name()   # após a senha — campo de busca já está disponível
     step_lobby()
 
     _delete_lock()

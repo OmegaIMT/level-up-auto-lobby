@@ -20,7 +20,7 @@ HIDDEN_WINDOW = subprocess.STARTUPINFO()
 HIDDEN_WINDOW.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # cspell:disable-line
 HIDDEN_WINDOW.wShowWindow = 0  # cspell:disable-line
 
-STATUS_FILE = "panel_status.txt"
+STATUS_FILE = "status.json"
 CONFIG_FILE = "config.json"
 
 processo_lobby = None
@@ -94,10 +94,23 @@ def atualizar_interface_idioma(event=None) -> None:
 # ==================================================
 # HELPERS
 # ==================================================
-def save_status(partidas: int, rehost_max: int, ciclos: int) -> None:
+def save_status(partidas: int, rehost_max: int, ciclos: int, current_pw: str = "") -> None:
+    """
+    Grava o status inicial em status.json (mesmo formato que o lobby.py usa
+    para atualizações ao vivo: partidas, rehost_max, ciclos, current_password,
+    password_deadline). O lobby.py é quem mantém esse arquivo atualizado
+    depois que a sessão começa; aqui só inicializamos com os valores de start.
+    """
+    payload = {
+        "partidas": partidas,
+        "rehost_max": rehost_max,
+        "ciclos": ciclos,
+        "current_password": current_pw,
+        "password_deadline": 0.0,
+    }
     try:
-        with open(STATUS_FILE, "w") as f:
-            f.write(f"{partidas}\n{rehost_max}\n{ciclos}")
+        with open(STATUS_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
 
@@ -188,7 +201,7 @@ def start() -> None:
         "support": support_var.get(),
     }
     save_config(config)
-    save_status(0, int(rehost), 0)
+    save_status(0, int(rehost), 0, current_pw=pw1)
 
     if os.path.exists("lobby.exe"):
         processo_lobby = subprocess.Popen(["lobby.exe", CONFIG_FILE], startupinfo=HIDDEN_WINDOW)
