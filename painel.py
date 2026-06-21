@@ -4,6 +4,7 @@ import threading
 import tkinter as tk
 import keyboard
 
+
 STATUS_FILE   = "panel_status.txt"
 POLL_INTERVAL = 800   # ms
 
