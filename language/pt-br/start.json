@@ -1,10 +1,7 @@
 {
     "title": "Auto Lobby Level Up",
 
-    "password_1": "Senha 1",
-    "password_2": "Senha 2",
-    "password_3": "Senha 3",
-    "password_interval": "Intervalo de Senha (min)",
+    "password_1": "Senha",
     "rehost": "Re-Host",
     "language": "Idioma",
     "resolution": "Resolução",
@@ -16,11 +13,7 @@
     "start": "Start",
 
     "status_started": "Iniciado",
-    "error_interval": "Intervalo de Senha deve ser um número ≥ 1",
     "error_rehost": "Re-Host deve ser um número ≥ 1",
 
-    "footer": "© 2026 Bastos Develop. Todos os direitos reservados.",
-
-    "theme_light": "Claro",
-    "theme_dark": "Escuro"
+    "footer": "© 2026 Bastos Develop. Todos os direitos reservados."
 }

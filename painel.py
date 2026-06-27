@@ -1,7 +1,6 @@
 import os
 import sys
 import json
-import time
 import threading
 import tkinter as tk
 import keyboard
@@ -24,9 +23,6 @@ DEFAULT_LANGUAGE = "pt-br"
 TEXT_DEFAULTS = {
     "rehost_label": "re-host",
     "ciclos_label": "ciclos",
-    "password_label": "senha",
-    "next_password_label": "troca em",
-    "no_data": "--",
 }
 
 TEXT: dict = {}
@@ -36,7 +32,7 @@ _last_status: dict = {}
 
 
 def _load_language() -> str:
-    """Lê o idioma salvo pelo start.py no config.json."""
+    """Lê o idioma saved pelo start.py no config.json."""
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -90,33 +86,13 @@ def read_status() -> dict | None:
     return None
 
 
-def _format_countdown(seconds_left: float) -> str:
-    if seconds_left <= 0:
-        return TEXT.get("no_data", "--")
-    total = int(seconds_left)
-    minutes, secs = divmod(total, 60)
-    return f"{minutes:02d}:{secs:02d}"
-
-
 def render(status: dict) -> None:
     partidas   = status.get("partidas", 0)
     rehost_max = status.get("rehost_max", 0)
     ciclos     = status.get("ciclos", 0)
-    current_pw = status.get("current_password", "") or TEXT.get("no_data", "--")
 
     label_rehost.config(text=f"{TEXT.get('rehost_label', 're-host')} = {partidas}/{rehost_max}")
     label_ciclos.config(text=f"{TEXT.get('ciclos_label', 'ciclos')}  = {ciclos}")
-    label_password.config(text=f"{TEXT.get('password_label', 'senha')}: {current_pw}")
-
-
-def tick_countdown() -> None:
-    """Atualiza a contagem regressiva a cada segundo, independente do poll do status.json."""
-    deadline = _last_status.get("password_deadline", 0.0) or 0.0
-    seconds_left = deadline - time.time() if deadline else 0.0
-    label_next_password.config(
-        text=f"{TEXT.get('next_password_label', 'troca em')}: {_format_countdown(seconds_left)}"
-    )
-    root.after(1000, tick_countdown)
 
 
 def poll() -> None:
@@ -127,7 +103,6 @@ def poll() -> None:
         no_data = TEXT.get("no_data", "--")
         label_rehost.config(text=f"{TEXT.get('rehost_label', 're-host')} = {no_data}/{no_data}")
         label_ciclos.config(text=f"{TEXT.get('ciclos_label', 'ciclos')}  = {no_data}")
-        label_password.config(text=f"{TEXT.get('password_label', 'senha')}: {no_data}")
 
     root.after(POLL_INTERVAL, poll)
 
@@ -159,7 +134,8 @@ if __name__ == "__main__":
     root.wm_attributes("-alpha", 0.80)
     root.configure(bg="black")
 
-    largura, altura = 200, 85
+    # Altura reduzida de 85 para 65 para ajustar ao sumiço do countdown
+    largura, altura = 200, 65
     pos_x = root.winfo_screenwidth() - largura - 20
     root.geometry(f"{largura}x{altura}+{pos_x}+20")
 
@@ -174,17 +150,8 @@ if __name__ == "__main__":
                             font=FONT, anchor="w")
     label_ciclos.pack(fill="x", padx=10, pady=(0, 0))
 
-    label_password = tk.Label(root, text="senha: --", fg=COLOR, bg="black",
-                            font=FONT, anchor="w")
-    label_password.pack(fill="x", padx=10, pady=(0, 0))
-
-    label_next_password = tk.Label(root, text="troca em: --", fg=COLOR, bg="black",
-                            font=FONT, anchor="w")
-    label_next_password.pack(fill="x", padx=10, pady=(0, 5))
-
     root.update()
     make_click_through(root)
 
     poll()
-    tick_countdown()
     root.mainloop()

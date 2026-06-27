@@ -29,7 +29,6 @@ processo_painel = None
 # ==================================================
 # CONFIGURATIONS & LANGUAGES
 # ==================================================
-# Aqui é onde as pastas são mapeadas. O app vai procurar em: language/<valor>/start.json
 LANGUAGES = {
     "Português (Brasil)": "pt-br",
     "English": "en-us",
@@ -43,7 +42,8 @@ RESOLUTIONS = {
     "1366x768": "1366x768",
 }
 
-# Iniciado vazio para forçar o carregamento do JSON
+LANGUAGES_REVERSE = {v: k for k, v in LANGUAGES.items()}
+
 TEXT = {}
 
 
@@ -62,6 +62,21 @@ def load_language(language_folder: str) -> None:
         print(f"Erro ao carregar idioma {language_folder}: {e}")
 
 
+def load_saved_config() -> dict | None:
+    """
+    Lê o config.json da última sessão salva
+    """
+    if not os.path.exists(CONFIG_FILE):
+        return None
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else None
+    except Exception as e:
+        print(f"Erro ao carregar config salva: {e}")
+        return None
+
+
 def atualizar_interface_idioma(event=None) -> None:
     """
     Detecta a mudança no Combobox, recarrega o JSON correspondente e atualiza os elementos visuais
@@ -69,15 +84,10 @@ def atualizar_interface_idioma(event=None) -> None:
     language_display = language_var.get()
     language_folder = LANGUAGES.get(language_display, "pt-br")
 
-    # Recarrega o dicionário TEXT com o arquivo da pasta selecionada
     load_language(language_folder)
 
-    # Atualiza os componentes da janela em tempo real
     root.title(TEXT.get("title", "Auto Lobby Level Up"))
-    lbl_pw1.config(text=TEXT.get("password_1", ""))
-    lbl_pw2.config(text=TEXT.get("password_2", ""))
-    lbl_pw3.config(text=TEXT.get("password_3", ""))
-    lbl_interval.config(text=TEXT.get("password_interval", ""))
+    lbl_pw1.config(text=TEXT.get("password_1", "Password"))
     lbl_rehost.config(text=TEXT.get("rehost", ""))
     lbl_language.config(text=TEXT.get("language", ""))
     lbl_resolution.config(text=TEXT.get("resolution", ""))
@@ -87,7 +97,6 @@ def atualizar_interface_idioma(event=None) -> None:
     btn_start.config(text=TEXT.get("start", ""))
     label_footer.config(text=TEXT.get("footer", ""))
 
-    # Limpa mensagens de erro antigas ao trocar de idioma
     label_status.config(text="")
 
 
@@ -96,10 +105,7 @@ def atualizar_interface_idioma(event=None) -> None:
 # ==================================================
 def save_status(partidas: int, rehost_max: int, ciclos: int, current_pw: str = "") -> None:
     """
-    Grava o status inicial em status.json (mesmo formato que o lobby.py usa
-    para atualizações ao vivo: partidas, rehost_max, ciclos, current_password,
-    password_deadline). O lobby.py é quem mantém esse arquivo atualizado
-    depois que a sessão começa; aqui só inicializamos com os valores de start.
+    Grava o status inicial em status.json
     """
     payload = {
         "partidas": partidas,
@@ -118,9 +124,6 @@ def save_status(partidas: int, rehost_max: int, ciclos: int, current_pw: str = "
 def save_config(config: dict) -> None:
     """
     Grava a configuração da sessão em config.json.
-    O lobby.py passa a ler esse arquivo em vez de variáveis de ambiente,
-    evitando recriar/reprocessar argumentos e permitindo reler o intervalo
-    de troca de senha sob demanda (sem polling constante via env).
     """
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -164,6 +167,40 @@ def watch_processes() -> None:
 # ==================================================
 # ACTIONS
 # ==================================================
+def apply_saved_config(saved: dict) -> None:
+    """
+    Preenche os campos da UI com os valores da última sessão salva.
+    """
+    password_data = saved.get("passwords", "")
+    
+    entry_pw1.delete(0, "end")
+    if isinstance(password_data, list):
+        # Fallback caso ainda exista algum config.json no formato de lista antigo
+        if password_data:
+            entry_pw1.insert(0, str(password_data[0]))
+    else:
+        # Formato atual: número ou string direta
+        entry_pw1.insert(0, str(password_data))
+
+    entry_rehost.delete(0, "end")
+    entry_rehost.insert(0, str(saved.get("rehost_max", 1)))
+
+    saved_language_folder = saved.get("language", "pt-br")
+    saved_language_display = LANGUAGES_REVERSE.get(saved_language_folder)
+    if saved_language_display:
+        language_var.set(saved_language_display)
+
+    saved_resolution = saved.get("resolution")
+    if saved_resolution in RESOLUTIONS:
+        resolution_var.set(saved_resolution)
+
+    crystal_var.set(bool(saved.get("crystal", False)))
+    equipment_var.set(bool(saved.get("equipment", False)))
+    support_var.set(bool(saved.get("support", False)))
+
+    atualizar_interface_idioma()
+
+
 def start() -> None:
     global processo_lobby, processo_painel
 
@@ -171,26 +208,18 @@ def start() -> None:
         return
 
     pw1 = entry_pw1.get().strip()
-    pw2 = entry_pw2.get().strip()
-    pw3 = entry_pw3.get().strip()
-    interval = entry_interval.get().strip() or "1"
     rehost = entry_rehost.get().strip() or "1"
 
     language_display = language_var.get()
     language_folder = LANGUAGES.get(language_display, "pt-br")
     resolution = resolution_var.get()
 
-    if not interval.isdigit() or int(interval) < 1:
-        label_status.config(text=TEXT.get("error_interval", "Error"), foreground="red")
-        return
-
     if not rehost.isdigit() or int(rehost) < 1:
         label_status.config(text=TEXT.get("error_rehost", "Error"), foreground="red")
         return
 
     config = {
-        "passwords": [pw1, pw2, pw3],
-        "password_interval_minutes": int(interval),
+        "passwords": [pw1],
         "rehost_max": int(rehost),
         "partidas_concluidas": 0,
         "ciclos": 0,
@@ -225,7 +254,7 @@ def start() -> None:
 # ==================================================
 if __name__ == "__main__":
     root = tk.Tk()
-    root.geometry("420x420")
+    root.geometry("420x360")  # Janela levemente reduzida na altura já que removemos campos
     root.resizable(False, False)
 
     if os.path.exists("level-up.ico"):
@@ -236,48 +265,17 @@ if __name__ == "__main__":
 
     root.protocol("WM_DELETE_WINDOW", on_close)
 
-    # Frame Principal Único
     frame = ttk.Frame(root, padding=15)
     frame.pack(fill="both", expand=True)
 
-    # Senhas (3 colunas lado a lado)
+    # Único campo de Senha (largura total)
     row_passwords = ttk.Frame(frame)
     row_passwords.pack(fill="x", pady=(0, 12))
-    row_passwords.columnconfigure(0, weight=1)
-    row_passwords.columnconfigure(1, weight=1)
-    row_passwords.columnconfigure(2, weight=1)
-
-    col_pw1 = ttk.Frame(row_passwords)
-    col_pw1.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-
-    col_pw2 = ttk.Frame(row_passwords)
-    col_pw2.grid(row=0, column=1, sticky="ew", padx=6)
-
-    col_pw3 = ttk.Frame(row_passwords)
-    col_pw3.grid(row=0, column=2, sticky="ew", padx=(6, 0))
-
-    lbl_pw1 = ttk.Label(col_pw1)
+    
+    lbl_pw1 = ttk.Label(row_passwords)
     lbl_pw1.pack(anchor="w")
-    entry_pw1 = ttk.Entry(col_pw1)
+    entry_pw1 = ttk.Entry(row_passwords)
     entry_pw1.pack(fill="x")
-
-    lbl_pw2 = ttk.Label(col_pw2)
-    lbl_pw2.pack(anchor="w")
-    entry_pw2 = ttk.Entry(col_pw2)
-    entry_pw2.pack(fill="x")
-
-    lbl_pw3 = ttk.Label(col_pw3)
-    lbl_pw3.pack(anchor="w")
-    entry_pw3 = ttk.Entry(col_pw3)
-    entry_pw3.pack(fill="x")
-
-    # Intervalo de Senha (antes do Re-Host)
-    lbl_interval = ttk.Label(frame)
-    lbl_interval.pack(anchor="w")
-
-    entry_interval = ttk.Entry(frame)
-    entry_interval.insert(0, "1")
-    entry_interval.pack(fill="x", pady=(0, 12))
 
     # Linha Re-Host
     lbl_rehost = ttk.Label(frame)
@@ -304,8 +302,6 @@ if __name__ == "__main__":
         col_lang, textvariable=language_var, state="readonly", values=list(LANGUAGES.keys())
     )
     combo_language.pack(fill="x")
-
-    # Vincula o evento de mudança de idioma à função de atualização
     combo_language.bind("<<ComboboxSelected>>", atualizar_interface_idioma)
 
     lbl_resolution = ttk.Label(col_resolution)
@@ -345,8 +341,11 @@ if __name__ == "__main__":
     label_footer = ttk.Label(frame, font=("Arial", 10), foreground="black")
     label_footer.pack(side="bottom", pady=(15, 0))
 
-    # Força a primeira carga baseada no idioma padrão (pt-br)
     atualizar_interface_idioma()
+
+    saved_config = load_saved_config()
+    if saved_config:
+        apply_saved_config(saved_config)
 
     watch_processes()
     root.mainloop()

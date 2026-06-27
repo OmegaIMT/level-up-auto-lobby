@@ -1,10 +1,7 @@
 {
     "title": "Auto Lobby Level Up",
 
-    "password_1": "Пароль 1",
-    "password_2": "Пароль 2",
-    "password_3": "Пароль 3",
-    "password_interval": "Интервал смены пароля (мин)",
+    "password_1": "Пароль",
     "rehost": "Re-Host",
     "language": "Язык",
     "resolution": "Разрешение",
@@ -16,11 +13,7 @@
     "start": "Старт",
 
     "status_started": "Запущено",
-    "error_interval": "Интервал смены пароля должен быть числом ≥ 1",
     "error_rehost": "Re-Host должен быть числом ≥ 1",
 
-    "footer": "© 2026 Bastos Develop. Все права защищены.",
-
-    "theme_light": "Светлая",
-    "theme_dark": "Тёмная"
+    "footer": "© 2026 Bastos Develop. Все права защищены."
 }

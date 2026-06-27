@@ -1,7 +1,4 @@
 {
     "rehost_label": "重新建房",
-    "ciclos_label": "循环",
-    "password_label": "密码",
-    "next_password_label": "切换倒计时",
-    "no_data": "--"
+    "ciclos_label": "循环"
 }

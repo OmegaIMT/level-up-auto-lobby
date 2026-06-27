@@ -1,7 +1,4 @@
 {
     "rehost_label": "re-host",
-    "ciclos_label": "ciclos",
-    "password_label": "senha",
-    "next_password_label": "troca em",
-    "no_data": "--"
+    "ciclos_label": "ciclos"
 }

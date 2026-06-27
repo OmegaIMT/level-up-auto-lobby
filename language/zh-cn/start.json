@@ -1,10 +1,7 @@
 {
     "title": "Auto Lobby Level Up",
 
-    "password_1": "密码 1",
-    "password_2": "密码 2",
-    "password_3": "密码 3",
-    "password_interval": "密码切换间隔（分钟）",
+    "password_1": "密码",
     "rehost": "重新建房",
     "language": "语言",
     "resolution": "分辨率",
@@ -16,11 +13,7 @@
     "start": "开始",
 
     "status_started": "已启动",
-    "error_interval": "密码切换间隔必须是大于等于 1 的数字",
     "error_rehost": "重新建房次数必须是大于等于 1 的数字",
 
-    "footer": "© 2026 Bastos Develop. 保留所有权利。",
-
-    "theme_light": "浅色",
-    "theme_dark": "深色"
+    "footer": "© 2026 Bastos Develop. 保留所有权利。"
 }
