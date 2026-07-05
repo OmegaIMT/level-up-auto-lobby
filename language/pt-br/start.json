@@ -1,19 +1,14 @@
 {
     "title": "Auto Lobby Level Up",
-
     "password_1": "Senha",
-    "rehost": "Re-Host",
+    "rehost": "Re-Host (Partidas)",
     "language": "Idioma",
     "resolution": "Resolução",
-
     "crystal": "Cristal",
     "equipment": "Equipamentos",
-    "support": "Suporte",
-
     "start": "Start",
-
     "status_started": "Iniciado",
     "error_rehost": "Re-Host deve ser um número ≥ 1",
-
-    "footer": "© 2026 Bastos Develop. Todos os direitos reservados."
+    "footer": "© 2026 Bastos Develop. Todos os direitos reservados.",
+    "no_xp": "Desativar XP"
 }

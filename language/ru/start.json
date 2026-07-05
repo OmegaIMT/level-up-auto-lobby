@@ -1,19 +1,14 @@
 {
     "title": "Auto Lobby Level Up",
-
     "password_1": "Пароль",
-    "rehost": "Re-Host",
+    "rehost": "Ре-Хост (Матчи)",
     "language": "Язык",
     "resolution": "Разрешение",
-
     "crystal": "Кристалл",
-    "equipment": "Снаряжение",
-    "support": "Поддержка",
-
+    "equipment": "Экипировка",
     "start": "Старт",
-
     "status_started": "Запущено",
-    "error_rehost": "Re-Host должен быть числом ≥ 1",
-
-    "footer": "© 2026 Bastos Develop. Все права защищены."
+    "error_rehost": "Ре-Хост должен быть числом ≥ 1",
+    "footer": "© 2026 Bastos Develop. Все права защищены.",
+    "no_xp": "Отключить XP"
 }

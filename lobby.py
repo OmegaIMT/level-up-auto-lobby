@@ -445,7 +445,7 @@ def _accept_loop() -> bool:
 def _refresh_until_game_appears() -> bool:
     """
     Clica em ATT continuamente em paralelo enquanto monitora se game.png aparece.
-    Como não há mais timeout de troca de senha, roda continuamente até achar o jogo.
+    Também monitora se full.png aparece; caso apareça, clica para fechar e continua.
     """
     att = locate("att.png")
     if not att:
@@ -466,9 +466,17 @@ def _refresh_until_game_appears() -> bool:
 
     def _observer() -> None:
         while not stop_event.is_set():
+            # 1. Verifica se o jogo foi encontrado
             if locate("game.png", confidence=0.90):
                 found_event.set()
                 return
+
+            # 2. Nova verificação: Se aparecer 'full.png', clica nela para fechar o aviso
+            full_pop = locate("full.png", confidence=0.80)
+            if full_pop:
+                safe_click(full_pop, pause=0.1)
+                time.sleep(0.2)  # Pausa rápida para o Dota processar o fechamento do popup
+
             time.sleep(POLL_FAST)
 
     clicker_thread = threading.Thread(target=_clicker, daemon=True)
@@ -482,7 +490,6 @@ def _refresh_until_game_appears() -> bool:
     observer_thread.join(timeout=2)
 
     return found
-
 
 # ==================================================
 # STEP LOBBY

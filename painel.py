@@ -7,7 +7,7 @@ import keyboard
 
 
 CONFIG_FILE  = "config.json"   # gerado pelo start.py — usado só para ler o idioma
-STATUS_FILE  = "status.json"   # atualizado ao vivo pelo lobby.py
+STATUS_FILE  = "status.json"   # atualizado ao vivo pelo in_game.py
 POLL_INTERVAL = 800   # ms
 
 LANGUAGES = {
@@ -19,7 +19,6 @@ LANGUAGES = {
 
 DEFAULT_LANGUAGE = "pt-br"
 
-# Textos default (usados se o painel.json do idioma não existir ou faltar uma chave)
 TEXT_DEFAULTS = {
     "rehost_label": "re-host",
     "ciclos_label": "ciclos",
@@ -32,7 +31,6 @@ _last_status: dict = {}
 
 
 def _load_language() -> str:
-    """Lê o idioma saved pelo start.py no config.json."""
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -44,7 +42,6 @@ def _load_language() -> str:
 
 
 def load_panel_texts(language_folder: str) -> None:
-    """Carrega language/<idioma>/painel.json, com fallback para os defaults."""
     global TEXT
     TEXT = dict(TEXT_DEFAULTS)
     path = os.path.join("language", language_folder, "painel.json")
@@ -57,17 +54,24 @@ def load_panel_texts(language_folder: str) -> None:
         print(f"Erro ao carregar painel.json ({language_folder}): {e}")
 
 
+def ensure_status_file() -> None:
+    """Gera status.json com valores default se o arquivo ainda não existir."""
+    if os.path.exists(STATUS_FILE):
+        return
+    default = {"partidas": 0, "rehost_max": 0, "ciclos": 0}
+    try:
+        with open(STATUS_FILE, "w", encoding="utf-8") as f:
+            json.dump(default, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
 def _watch_esc() -> None:
     keyboard.add_hotkey("esc", lambda: os._exit(0), suppress=False)
-    # Mantém a thread viva para o hotkey continuar registrado
     threading.Event().wait()
 
 
 def read_status() -> dict | None:
-    """
-    Lê status.json se o arquivo mudou desde a última leitura.
-    Retorna None se não mudou ou se houve erro (mantém o último valor exibido).
-    """
     global _last_status_mtime, _last_status
     try:
         mtime = os.path.getmtime(STATUS_FILE)
@@ -124,6 +128,8 @@ def make_click_through(window: tk.Tk) -> None:
 if __name__ == "__main__":
     threading.Thread(target=_watch_esc, daemon=True).start()
 
+    ensure_status_file()
+
     language_folder = _load_language()
     load_panel_texts(language_folder)
 
@@ -134,7 +140,6 @@ if __name__ == "__main__":
     root.wm_attributes("-alpha", 0.80)
     root.configure(bg="black")
 
-    # Altura reduzida de 85 para 65 para ajustar ao sumiço do countdown
     largura, altura = 200, 65
     pos_x = root.winfo_screenwidth() - largura - 20
     root.geometry(f"{largura}x{altura}+{pos_x}+20")

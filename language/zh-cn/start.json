@@ -1,19 +1,14 @@
 {
     "title": "Auto Lobby Level Up",
-
     "password_1": "密码",
-    "rehost": "重新建房",
+    "rehost": "重新主机 (比赛)",
     "language": "语言",
     "resolution": "分辨率",
-
     "crystal": "水晶",
     "equipment": "装备",
-    "support": "辅助",
-
     "start": "开始",
-
     "status_started": "已启动",
-    "error_rehost": "重新建房次数必须是大于等于 1 的数字",
-
-    "footer": "© 2026 Bastos Develop. 保留所有权利。"
+    "error_rehost": "重新主机必须是数字 ≥ 1",
+    "footer": "© 2026 Bastos Develop. 保留所有权利。",
+    "no_xp": "禁用经验值"
 }
