@@ -1,0 +1,13 @@
+PyAutoGUI
+keyboard
+opencv-python
+pytesseract
+pynput
+mouse
+PyYAML
+watchdog
+pyinstaller
+shapely
+scikit-image
+torch
+numpy

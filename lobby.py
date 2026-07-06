@@ -120,9 +120,9 @@ def save_status(
 SESSION = _load_session_config()
 
 # Lê a senha única do JSON novo (podendo vir como string/int direto ou lista antiga)
-raw_pw = SESSION.get("passwords", "4433")
+raw_pw = SESSION.get("passwords", "")
 if isinstance(raw_pw, list):
-    PASSWORD_FIXED = str(raw_pw[0]) if raw_pw else "4433"
+    PASSWORD_FIXED = str(raw_pw[0]) if raw_pw else ""
 else:
     PASSWORD_FIXED = str(raw_pw)
 
@@ -546,7 +546,7 @@ def step_lobby() -> None:
         _refresh_until_game_appears()
 
         # Game encontrado → duplo-clique
-        game = locate("game.png", confidence=0.90)
+        game = locate("game.png", confidence=0.75)
         if not game:
             continue
 

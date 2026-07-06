@@ -74,10 +74,13 @@ pyautogui.FAILSAFE = True
 _mouse_lock = threading.RLock()
 _stop_extras = threading.Event()
 
+STATUS_FILE = "status.json"
+
 def save_status(partidas: int, rehost_max: int, ciclos: int) -> None:
+    payload = {"partidas": partidas, "rehost_max": rehost_max, "ciclos": ciclos}
     try:
-        with open("panel_status.txt", "w") as f:
-            f.write(f"{partidas}\n{rehost_max}\n{ciclos}")
+        with open(STATUS_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
 
@@ -314,16 +317,16 @@ def subir_status() -> None:
     gold_pos = scale_coord(GOLD_BASE)
     status_pos = scale_coord(STATUS_BASE)
 
-    _click_at(*gold_pos, delay=0.3)
+    _click_at(*gold_pos, delay=0.5)
     for _ in range(8):
         _click_at(*status_pos, delay=0.5)
-    _click_at(*gold_pos, delay=0.3)
+    _click_at(*gold_pos, delay=0.5)
 
 def monitorar_status() -> None:
     while not _stop_extras.is_set():
         try:
             if GOLD_BASE:
-                _click_at(*scale_coord(GOLD_BASE), delay=0.3)
+                _click_at(*scale_coord(GOLD_BASE), delay=0.5)
 
             hammer_pos = locate("hammer", "suporte", "hammer.png", confidence=0.8)
             pill_pos = locate("pill", "suporte", "pill.png", confidence=0.8)
@@ -332,11 +335,11 @@ def monitorar_status() -> None:
                 if STATUS_11_BASE:
                     pos = scale_coord(STATUS_11_BASE)
                     for _ in range(3):
-                        _click_at(*pos, delay=0.3)
+                        _click_at(*pos, delay=0.5)
                 if STATUS_12_BASE:
                     pos = scale_coord(STATUS_12_BASE)
                     for _ in range(2):
-                        _click_at(*pos, delay=0.3)
+                        _click_at(*pos, delay=0.5)
                 verificar_e_mover_itens_slots([0, 1, 2, 3])
             else:
                 for status_base in STATUS_LIST_BASE:
@@ -346,7 +349,7 @@ def monitorar_status() -> None:
                 verificar_e_mover_itens_slots([0, 1, 2, 3])
 
             if GOLD_BASE:
-                _click_at(*scale_coord(GOLD_BASE), delay=0.3)
+                _click_at(*scale_coord(GOLD_BASE), delay=0.5)
 
         except Exception:
             pass
@@ -462,11 +465,10 @@ def disconnect_and_relaunch() -> None:
     except Exception:
         pass
 
-    pw_atual = load_config().get("passwords", "")
     if os.path.exists("lobby.exe"):
-        subprocess.Popen(["lobby.exe", pw_atual], startupinfo=HIDDEN_WINDOW)
+        subprocess.Popen(["lobby.exe", CONFIG_FILE], startupinfo=HIDDEN_WINDOW)
     else:
-        subprocess.Popen([sys.executable, "lobby.py", pw_atual], startupinfo=HIDDEN_WINDOW)
+        subprocess.Popen([sys.executable, "lobby.py", CONFIG_FILE], startupinfo=HIDDEN_WINDOW)
     os._exit(0)
 
 def _bonus_watcher() -> None:
@@ -483,54 +485,57 @@ def monitor_match() -> None:
     global PARTIDAS_CONCLUIDAS, CICLOS_FEITOS
 
     count_ever_seen = False
-    count_visible   = False
-    last_seen_time  = time.time()
+    last_seen_time = time.time()
 
     while True:
         pos_count = locate("count", "count.png", confidence=0.70)
 
-        if pos_count:
-            if not count_ever_seen:
-                count_ever_seen = True
-                _stop_extras.set()
+        if pos_count and not count_ever_seen:
+            count_ever_seen = True
+            _stop_extras.set()
 
-                PARTIDAS_CONCLUIDAS += 1
-                save_status(PARTIDAS_CONCLUIDAS, REHOST_MAX, CICLOS_FEITOS)
-                save_config_update(partidas_concluidas=PARTIDAS_CONCLUIDAS)
+            PARTIDAS_CONCLUIDAS += 1
+            save_status(PARTIDAS_CONCLUIDAS, REHOST_MAX, CICLOS_FEITOS)
+            save_config_update(partidas_concluidas=PARTIDAS_CONCLUIDAS)
 
-                if PARTIDAS_CONCLUIDAS >= REHOST_MAX:
-                    vezes_bonus = int(CRYSTAL) + int(EQUIPMENT)
-                    if vezes_bonus > 0:
-                        esperar_e_clicar_bonus(vezes_bonus)
+            if PARTIDAS_CONCLUIDAS >= REHOST_MAX:
+                vezes_bonus = int(CRYSTAL) + int(EQUIPMENT)
+                if vezes_bonus > 0:
+                    esperar_e_clicar_bonus(vezes_bonus)
 
-                    CICLOS_FEITOS += 1
-                    save_status(0, REHOST_MAX, CICLOS_FEITOS)
-                    save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
-                    disconnect_and_relaunch()
-                    return
-
-            count_visible  = True
-            last_seen_time = time.time()
-
-        else:
-            tempo_sem_count = time.time() - last_seen_time
-
-            if count_visible:
-                count_visible = False
-                time.sleep(2.0)
-                if os.path.exists("in_game.exe"):
-                    subprocess.Popen(["in_game.exe"], startupinfo=HIDDEN_WINDOW)
-                else:
-                    subprocess.Popen([sys.executable, "in_game.py"], startupinfo=HIDDEN_WINDOW)
-                os._exit(0)
-
-            elif not count_ever_seen and tempo_sem_count > TIMEOUT_SEM_COUNT:
+                CICLOS_FEITOS += 1
                 save_status(0, REHOST_MAX, CICLOS_FEITOS)
                 save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
                 disconnect_and_relaunch()
                 return
 
+            # Espera a próxima partida começar
+            wait_for_match_start(timeout=None)
+
+            iniciar_partida()
+
+            count_ever_seen = False
+            last_seen_time = time.time()
+
+        elif not count_ever_seen and (time.time() - last_seen_time > TIMEOUT_SEM_COUNT):
+            save_status(0, REHOST_MAX, CICLOS_FEITOS)
+            save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
+            disconnect_and_relaunch()
+            return
+
         time.sleep(POLL_IN_GAME)
+        
+def iniciar_partida(criar_threads=True):
+    _stop_extras.clear()
+
+    disable_xp()
+    subir_status()
+    verificar_e_mover_itens()
+
+    if criar_threads:
+        threading.Thread(target=_bonus_watcher, daemon=True).start()
+        threading.Thread(target=monitorar_tesouro, daemon=True).start()
+        threading.Thread(target=monitorar_status, daemon=True).start()
 
 if __name__ == "__main__":
     threading.Thread(target=_watch_esc, daemon=True).start()
@@ -539,13 +544,7 @@ if __name__ == "__main__":
     if not wait_for_match_start(timeout=None):
         sys.exit(1)
 
-    disable_xp()
-    subir_status()
-    verificar_e_mover_itens()
-
-    threading.Thread(target=_bonus_watcher, daemon=True).start()
-    threading.Thread(target=monitorar_tesouro, daemon=True).start()
-    threading.Thread(target=monitorar_status, daemon=True).start()
+    iniciar_partida()
 
     save_status(PARTIDAS_CONCLUIDAS, REHOST_MAX, CICLOS_FEITOS)
     monitor_match()
