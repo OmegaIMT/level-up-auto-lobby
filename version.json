@@ -1,0 +1,9 @@
+{
+    "version": "1.0.1",
+    "files": [
+        "lobby.py",
+        "in_game.py",
+        "painel.py",
+        "start.py"
+    ]
+}

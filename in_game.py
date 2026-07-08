@@ -12,6 +12,10 @@ if sys.platform == "win32":
     import ctypes
     kernel32 = ctypes.WinDLL("kernel32")
     user32   = ctypes.WinDLL("user32")
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PER_MONITOR_AWARE
+    except Exception:
+        user32.SetProcessDPIAware()
     hWnd = kernel32.GetConsoleWindow()
     if hWnd:
         user32.ShowWindow(hWnd, 0)
@@ -47,8 +51,15 @@ RESOLUTION = CONFIG.get("resolution", "1920x1080")
 NO_XP      = bool(CONFIG.get("no_xp", False))
 CRYSTAL    = bool(CONFIG.get("crystal", False))
 EQUIPMENT  = bool(CONFIG.get("equipment", False))
+SUPORTE    = bool(CONFIG.get("support", False))
 
+# IMG_DIR: agora só guarda o que continua dependente de idioma (bonus, count).
 IMG_DIR = os.path.join("language", LANGUAGE, RESOLUTION, "in_game")
+
+# GLOBAL_DIR: imagens independentes de idioma, só dependem da resolução.
+# Aqui vivem: fonte.png, a pasta "suporte" inteira (hammer/pill/tesouro/slot),
+# a pasta "event" e a pasta "error".
+GLOBAL_DIR = os.path.join("language", "global", RESOLUTION)
 
 REHOST_MAX          = int(CONFIG.get("rehost_max", 5))
 CICLOS_FEITOS       = int(CONFIG.get("ciclos", 0))
@@ -61,6 +72,15 @@ POLL_BONUS        = 3.0
 POLL_TESOURO      = 10.0
 POLL_STATUS       = 30.0
 TIMEOUT_SEM_COUNT = 4800
+
+# Tempo (s) sem ver count.png a partir do qual passamos a checar as imagens
+# de erro na pasta global "error".
+ERROR_CHECK_SECONDS = 600
+ERROR_DIR_NAME       = "error"
+
+# Janela de busca do evento após o início da partida.
+EVENTO_WAIT_FIRST = 360  # 6 min
+EVENTO_WAIT_RETRY = 60   # +1 min
 
 pyautogui.PAUSE    = 0.1
 pyautogui.FAILSAFE = True
@@ -132,7 +152,12 @@ def _cache_invalidate(name: str) -> None:
 Region = tuple[int, int, int, int]
 
 def _img(*parts: str) -> str:
+    """Caminho dentro de IMG_DIR (dependente de idioma) — hoje só bonus/count."""
     return os.path.join(IMG_DIR, *parts)
+
+def _global_img(*parts: str) -> str:
+    """Caminho dentro de GLOBAL_DIR (independente de idioma, só por resolução)."""
+    return os.path.join(GLOBAL_DIR, *parts)
 
 def _locate_raw(path: str, confidence: float, region: Optional[Region] = None) -> Optional[tuple[int, int]]:
     try:
@@ -140,8 +165,8 @@ def _locate_raw(path: str, confidence: float, region: Optional[Region] = None) -
     except Exception:
         return None
 
-def locate(cache_key: str, *path_parts: str, confidence: float = 0.85) -> Optional[tuple[int, int]]:
-    full_path = _img(*path_parts)
+def locate(cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir: str = IMG_DIR) -> Optional[tuple[int, int]]:
+    full_path = os.path.join(base_dir, *path_parts)
     if not os.path.exists(full_path):
         return None
 
@@ -266,7 +291,7 @@ def is_slot_occupied(coord_base: tuple[int, int]) -> bool:
     x, y = scale_coord(coord_base)
     half = SLOT_CHECK_HALF
     region: Region = (max(0, x - half), max(0, y - half), half * 2, half * 2)
-    return _locate_raw(_img("suporte", "slot.png"), confidence=0.85, region=region) is None
+    return _locate_raw(_global_img("suporte", "slot.png"), confidence=0.75, region=region) is None
 
 def click_organizar() -> None:
     if ORGANIZAR_BASE is None:
@@ -328,8 +353,8 @@ def monitorar_status() -> None:
             if GOLD_BASE:
                 _click_at(*scale_coord(GOLD_BASE), delay=0.5)
 
-            hammer_pos = locate("hammer", "suporte", "hammer.png", confidence=0.8)
-            pill_pos = locate("pill", "suporte", "pill.png", confidence=0.8)
+            hammer_pos = locate("hammer", "suporte", "hammer.png", confidence=0.75, base_dir=GLOBAL_DIR)
+            pill_pos = locate("pill", "suporte", "pill.png", confidence=0.75, base_dir=GLOBAL_DIR)
 
             if hammer_pos or pill_pos:
                 if STATUS_11_BASE:
@@ -359,7 +384,7 @@ def monitorar_status() -> None:
 _tesouros_clicados: List[str] = []
 
 def carregar_imagens_tesouro() -> List[str]:
-    pasta = os.path.join(IMG_DIR, "suporte", "tesouro")
+    pasta = os.path.join(GLOBAL_DIR, "suporte", "tesouro")
     if not os.path.exists(pasta):
         return []
     imagens = []
@@ -372,8 +397,8 @@ def carregar_imagens_tesouro() -> List[str]:
     return [img[1] for img in imagens]
 
 def encontrar_tesouro_principal() -> Optional[tuple[int, int]]:
-    for conf in (0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6):
-        pos = locate("tesouro", "suporte", "tesouro.png", confidence=conf)
+    for conf in (0.75, 0.7, 0.65, 0.6):
+        pos = locate("tesouro", "suporte", "tesouro.png", confidence=conf, base_dir=GLOBAL_DIR)
         if pos:
             return pos
     return None
@@ -393,21 +418,21 @@ def monitorar_tesouro() -> None:
                 click_pos(pos_tesouro, 0.5)
                 encontrou = False
 
-                for confianca in (0.85, 0.6):
+                for confianca in (0.75, 0.6):
                     if encontrou:
                         break
                     for img_nome in imagens_tesouro:
-                        if confianca == 0.85 and img_nome in _tesouros_clicados:
+                        if confianca == 0.75 and img_nome in _tesouros_clicados:
                             continue
 
-                        img_path = os.path.join(IMG_DIR, "suporte", "tesouro", img_nome)
+                        img_path = os.path.join(GLOBAL_DIR, "suporte", "tesouro", img_nome)
                         pos = _locate_raw(img_path, confidence=confianca)
                         if not pos:
                             continue
 
                         encontrou = True
                         click_pos(pos, 0.5)
-                        if confianca == 0.85:
+                        if confianca == 0.75:
                             _tesouros_clicados.append(img_nome)
 
                         time.sleep(0.5)
@@ -426,7 +451,7 @@ def esperar_e_clicar_bonus(vezes: int = 1) -> None:
     poll_rapido = 0.3
 
     while restantes > 0:
-        pos = locate("bonus", "bonus.png", confidence=0.85)
+        pos = locate("bonus", "bonus.png", confidence=0.75)
         if pos:
             click_pos(pos, 0.2)
             restantes -= 1
@@ -435,7 +460,7 @@ def esperar_e_clicar_bonus(vezes: int = 1) -> None:
             # evita clicar duas vezes na mesma e evita perder uma que
             # aparece/some rápido em sequência
             espera_sumir = time.time()
-            while locate("bonus", "bonus.png", confidence=0.85):
+            while locate("bonus", "bonus.png", confidence=0.75):
                 if time.time() - espera_sumir > 5:
                     break
                 time.sleep(poll_rapido)
@@ -451,7 +476,7 @@ def disable_xp() -> None:
 def wait_for_match_start(poll: float = 2.0, timeout: Optional[float] = None) -> bool:
     started_at = time.time()
     while True:
-        if locate("fonte", "fonte.png", confidence=0.8):
+        if locate("fonte", "fonte.png", confidence=0.75, base_dir=GLOBAL_DIR):
             descansar_mouse()
             return True
         if timeout is not None and (time.time() - started_at) > timeout:
@@ -474,18 +499,62 @@ def disconnect_and_relaunch() -> None:
 def _bonus_watcher() -> None:
     while True:
         try:
-            pos = locate("bonus", "bonus.png", confidence=0.85)
+            pos = locate("bonus", "bonus.png", confidence=0.75)
             if pos:
                 click_pos(pos, 0.5)
         except Exception:
             pass
         time.sleep(POLL_BONUS)
 
+# ==================================================
+# EVENTO (global, independe de idioma/SUPORTE)
+# ==================================================
+def buscar_evento() -> None:
+    """
+    6 min após o início da partida, procura language/global/RESOLUTION/event/event.png.
+    Se achar: clica uma vez e encerra.
+    Se não achar: tenta de novo depois de mais 1 min.
+    Se ainda assim não achar: encerra e só busca de novo na próxima partida
+    (uma thread nova é criada a cada iniciar_partida()).
+    """
+    if _stop_extras.wait(timeout=EVENTO_WAIT_FIRST):
+        return  # partida encerrou antes da primeira checagem
+
+    pos = _locate_raw(_global_img("event", "event.png"), confidence=0.75)
+    if pos:
+        click_pos(pos, 0.3)
+        return
+
+    if _stop_extras.wait(timeout=EVENTO_WAIT_RETRY):
+        return  # partida encerrou antes da segunda checagem
+
+    pos = _locate_raw(_global_img("event", "event.png"), confidence=0.75)
+    if pos:
+        click_pos(pos, 0.3)
+    # se não achar na segunda tentativa, encerra sem fazer nada
+
+# ==================================================
+# ERRO (global, independe de idioma)
+# ==================================================
+def carregar_imagens_erro() -> List[str]:
+    pasta = _global_img(ERROR_DIR_NAME)
+    if not os.path.exists(pasta):
+        return []
+    return sorted(f for f in os.listdir(pasta) if f.endswith(".png"))
+
+def verificar_erro() -> Optional[str]:
+    for nome in carregar_imagens_erro():
+        caminho = _global_img(ERROR_DIR_NAME, nome)
+        if _locate_raw(caminho, confidence=0.75):
+            return nome
+    return None
+
 def monitor_match() -> None:
     global PARTIDAS_CONCLUIDAS, CICLOS_FEITOS
 
     count_ever_seen = False
     last_seen_time = time.time()
+    erro_verificado = False
 
     while True:
         pos_count = locate("count", "count.png", confidence=0.70)
@@ -516,26 +585,47 @@ def monitor_match() -> None:
 
             count_ever_seen = False
             last_seen_time = time.time()
+            erro_verificado = False
 
-        elif not count_ever_seen and (time.time() - last_seen_time > TIMEOUT_SEM_COUNT):
-            save_status(0, REHOST_MAX, CICLOS_FEITOS)
-            save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
-            disconnect_and_relaunch()
-            return
+        elif not count_ever_seen:
+            elapsed = time.time() - last_seen_time
+
+            # Checagem de erro: só uma vez por ciclo de espera, depois de ERROR_CHECK_SECONDS.
+            if not erro_verificado and elapsed > ERROR_CHECK_SECONDS:
+                erro_verificado = True
+                nome_erro = verificar_erro()
+                if nome_erro:
+                    # Mesmo comportamento de quando atinge o max de partidas:
+                    # fecha o dota, chama o lobby e salva mais um ciclo.
+                    CICLOS_FEITOS += 1
+                    save_status(0, REHOST_MAX, CICLOS_FEITOS)
+                    save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
+                    disconnect_and_relaunch()
+                    return
+
+            if elapsed > TIMEOUT_SEM_COUNT:
+                save_status(0, REHOST_MAX, CICLOS_FEITOS)
+                save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
+                disconnect_and_relaunch()
+                return
 
         time.sleep(POLL_IN_GAME)
-        
+
 def iniciar_partida(criar_threads=True):
     _stop_extras.clear()
 
     disable_xp()
-    subir_status()
-    verificar_e_mover_itens()
+
+    if SUPORTE:
+        subir_status()
+        verificar_e_mover_itens()
 
     if criar_threads:
         threading.Thread(target=_bonus_watcher, daemon=True).start()
-        threading.Thread(target=monitorar_tesouro, daemon=True).start()
-        threading.Thread(target=monitorar_status, daemon=True).start()
+        threading.Thread(target=buscar_evento, daemon=True).start()
+        if SUPORTE:
+            threading.Thread(target=monitorar_tesouro, daemon=True).start()
+            threading.Thread(target=monitorar_status, daemon=True).start()
 
 if __name__ == "__main__":
     threading.Thread(target=_watch_esc, daemon=True).start()

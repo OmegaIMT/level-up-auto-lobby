@@ -10,5 +10,6 @@
     "status_started": "Запущено",
     "error_rehost": "Ре-Хост должен быть числом ≥ 1",
     "footer": "© 2026 Bastos Develop. Все права защищены.",
-    "no_xp": "Отключить XP"
+    "no_xp": "Отключить XP",
+    "support": "Поддержка"
 }

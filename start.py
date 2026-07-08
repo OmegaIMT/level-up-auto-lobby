@@ -5,6 +5,8 @@ import json
 import tkinter as tk
 from tkinter import ttk
 
+import updater
+
 # ==================================================
 # HIDE CONSOLE
 # ==================================================
@@ -88,6 +90,7 @@ def apply_saved_config(saved: dict) -> None:
     crystal_var.set(bool(saved.get("crystal", False)))
     equipment_var.set(bool(saved.get("equipment", False)))
     no_xp_var.set(bool(saved.get("no_xp", False)))
+    support_var.set(bool(saved.get("support", False)))
 
     atualizar_interface_idioma()
 
@@ -105,6 +108,7 @@ def atualizar_interface_idioma(event=None) -> None:
     chk_crystal.config(text=TEXT.get("crystal", "Cristal"))
     chk_equipment.config(text=TEXT.get("equipment", "Equipamentos"))
     chk_no_xp.config(text=TEXT.get("no_xp", "Desativar XP"))
+    chk_support.config(text=TEXT.get("support", "Suporte"))
     btn_start.config(text=TEXT.get("start", "Start"))
     label_footer.config(text=TEXT.get("footer", ""))
 
@@ -178,6 +182,7 @@ def start() -> None:
         "crystal": crystal_var.get(),
         "equipment": equipment_var.get(),
         "no_xp": no_xp_var.get(),
+        "support": support_var.get(),
     }
 
     save_config(config)
@@ -198,9 +203,34 @@ def start() -> None:
     root.after(1200, root.iconify)
 
 # ==================================================
+# AUTO-UPDATE (GitHub) — roda antes de qualquer coisa aparecer na tela
+# ==================================================
+def run_update_check() -> None:
+    """
+    Confirma um self-update pendente do boot anterior e checa se há uma
+    versão nova no GitHub. Se o próprio start.exe precisar atualizar,
+    aplica a troca e encerra o processo atual (o .bat reabre o novo exe).
+    Falhas de rede são silenciosas — o app sempre abre normalmente.
+    """
+    updater.confirm_pending_version_if_any()
+
+    resultado = updater.check_for_updates()
+
+    if resultado.self_update_ready and resultado.self_update_path:
+        updater.apply_self_update_and_restart(resultado.self_update_path)
+        os._exit(0)
+
+    if resultado.updated:
+        print(f"Atualizado para versão {resultado.remote_version} (arquivos: {resultado.updated_files})")
+    elif resultado.error:
+        print(f"Update check: {resultado.error}")
+
+# ==================================================
 # UI INITIALIZATION
 # ==================================================
 if __name__ == "__main__":
+    run_update_check()
+
     root = tk.Tk()
     root.geometry("350x320")
     root.resizable(False, False)
@@ -248,7 +278,7 @@ if __name__ == "__main__":
     combo_resolution = ttk.Combobox(col_resolution, textvariable=resolution_var, state="readonly", values=list(RESOLUTIONS.keys()))
     combo_resolution.pack(fill="x")
 
-    # Checkboxes (3 apenas: Cristal, Equipamentos, Desativar XP)
+    # Checkboxes (3: Cristal, Equipamentos, Desativar XP)
     checkbox_row = ttk.Frame(frame)
     checkbox_row.pack(fill="x", pady=(12, 12))
     crystal_var = tk.BooleanVar()
@@ -260,6 +290,13 @@ if __name__ == "__main__":
     no_xp_var = tk.BooleanVar()
     chk_no_xp = ttk.Checkbutton(checkbox_row, variable=no_xp_var)
     chk_no_xp.pack(side="left", padx=(20, 0))
+
+    # Linha separada para "Support" (evita espremer o layout de 350px)
+    checkbox_row_2 = ttk.Frame(frame)
+    checkbox_row_2.pack(fill="x", pady=(0, 12))
+    support_var = tk.BooleanVar()
+    chk_support = ttk.Checkbutton(checkbox_row_2, variable=support_var)
+    chk_support.pack(side="left")
 
     # Botões e Status
     btn_start = ttk.Button(frame, command=start)

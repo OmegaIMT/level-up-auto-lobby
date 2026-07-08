@@ -10,5 +10,6 @@
     "status_started": "已启动",
     "error_rehost": "重新主机必须是数字 ≥ 1",
     "footer": "© 2026 Bastos Develop. 保留所有权利。",
-    "no_xp": "禁用经验值"
+    "no_xp": "禁用经验值",
+    "support": "支持"
 }

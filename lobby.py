@@ -17,6 +17,15 @@ if sys.platform == "win32":
 
     kernel32 = ctypes.WinDLL("kernel32")
     user32 = ctypes.WinDLL("user32")
+
+    # DPI awareness: sem isso, GetSystemMetrics/screenshot usam resolução
+    # escalada pelo Windows (ex: 1536x864 em vez de 1920x1080 físico),
+    # e os templates de imagem (capturados em pixels reais) nunca batem.
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PER_MONITOR_AWARE
+    except Exception:
+        user32.SetProcessDPIAware()
+
     hWnd = kernel32.GetConsoleWindow()
     if hWnd:
         user32.ShowWindow(hWnd, 0)
@@ -257,7 +266,7 @@ def _locate_raw(
         return None
 
 
-def locate(name: str, confidence: float = 0.80) -> Optional[tuple[int, int]]:
+def locate(name: str, confidence: float = 0.7) -> Optional[tuple[int, int]]:
     cached = _coord_cache.get(name)
 
     if cached is not None:
@@ -281,7 +290,7 @@ def locate(name: str, confidence: float = 0.80) -> Optional[tuple[int, int]]:
 
 def wait_for(
     name: str,
-    confidence: float = 0.80,
+    confidence: float = 0.7,
     timeout: float = 60,
 ) -> Optional[tuple[int, int]]:
     deadline = time.time() + timeout
@@ -467,12 +476,12 @@ def _refresh_until_game_appears() -> bool:
     def _observer() -> None:
         while not stop_event.is_set():
             # 1. Verifica se o jogo foi encontrado
-            if locate("game.png", confidence=0.90):
+            if locate("game.png", confidence=0.7):
                 found_event.set()
                 return
 
             # 2. Nova verificação: Se aparecer 'full.png', clica nela para fechar o aviso
-            full_pop = locate("full.png", confidence=0.80)
+            full_pop = locate("full.png", confidence=0.70)
             if full_pop:
                 safe_click(full_pop, pause=0.1)
                 time.sleep(0.2)  # Pausa rápida para o Dota processar o fechamento do popup
@@ -536,7 +545,7 @@ def step_lobby() -> None:
         if err:
             safe_click(err, pause=0.1)
             time.sleep(0.2)
-            safe_click(locate("att.png"), pause=0.1)
+            safe_click(locate("att.png"), pause=0.2)
             continue
 
         if locate("sala.png"):
@@ -546,7 +555,7 @@ def step_lobby() -> None:
         _refresh_until_game_appears()
 
         # Game encontrado → duplo-clique
-        game = locate("game.png", confidence=0.75)
+        game = locate("game.png", confidence=0.7)
         if not game:
             continue
 
