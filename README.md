@@ -8,13 +8,15 @@ O bot é dividido em processos independentes, cada um lançado pelo anterior:
 
 | Arquivo | Papel |
 |---|---|
-| `start.py` | GUI (Tkinter) de configuração. Salva `config.json`, checa update no GitHub e lança `lobby.py`/`painel.py`. |
+| `start.py` | GUI (Tkinter) de configuração. Salva `config.json`, checa update no GitHub e lança `lobby.py`/`painel.py`. É o **único** que roda como `.exe`. |
 | `lobby.py` | Abre o Dota, digita senha, busca a sala pelo prefixo `up-`, entra na partida e lança `in_game.py`. |
 | `in_game.py` | Roda durante a partida: desativa XP, coleta bônus/tesouro, organiza mochila, dispara o evento, detecta fim de partida e reinicia o ciclo (`lobby.py`) até bater o `rehost_max`. |
-| `painel.py` | Overlay transparente e click-through no canto da tela mostrando `partidas/rehost` e `ciclos`. |
-| `updater.py` | Auto-update via GitHub Releases (baixa `.exe` novos e `language.zip`). |
+| `painel.py` | Overlay transparente e click-through no canto da tela mostrando `partidas/rehost`, `ciclos` e a última imagem buscada (debug ao vivo). |
+| `updater.py` | Auto-update via git (raw `version.txt` + zipball da branch `main`), sem precisar de Release nem rebuild. |
 | `coord.py` | Ferramenta manual (rodar à parte) para capturar coordenadas fixas de clique e gerar `coords_base.json`. |
-| `build.py` + `build.spec` | Empacota os 4 entrypoints em `.exe` via PyInstaller e organiza a pasta `dist/`. |
+| `build.py` + `build.spec` | Empacota **só `start.py`** em `.exe` via PyInstaller e copia `lobby.py`/`in_game.py`/`painel.py`/`language/`/etc pra raiz do `dist/`. |
+
+`lobby.py`, `in_game.py` e `painel.py` de propósito **não** viram `.exe` — rodam sempre como script (`python lobby.py`), lançados pelo `start.exe` via `subprocess`. Isso é o que permite o `updater.py` atualizar o comportamento do bot só dando `git push`, sem rebuildar nem gerar instalador de novo (ver seção "Release / auto-update").
 
 Toda a automação de tela funciona por **reconhecimento de imagem** (`pyautogui.locateOnScreen`), não por memory-reading nem OCR. As imagens de referência ficam em:
 
@@ -59,7 +61,7 @@ Na janela: informa a senha da lobby, quantidade de re-hosts, idioma, resolução
 python build.py
 ```
 
-Roda o PyInstaller com `build.spec` e organiza `level-up.ico` e `language/` na raiz de `dist/Dota-level-up-lobby/`.
+Roda o PyInstaller com `build.spec` (só `start.exe`) e copia `lobby.py`, `in_game.py`, `painel.py`, `updater.py`, `coords_base.json`, `requirements.txt`, `version.txt`, `level-up.ico` e `language/` pra raiz de `dist/Dota-level-up-lobby/`.
 
 ## Instalador (Setup.exe)
 
@@ -74,10 +76,12 @@ Gera `installer_output/Dota-Level-Up-Lobby-Setup-<versão>.exe`. O instalador de
 
 ## Release / auto-update
 
-O `updater.py` consulta a última *Release* do repositório no GitHub. Pra publicar uma atualização:
+O `updater.py` compara o `version.txt` local com o `version.txt` da branch `main` no GitHub (via `raw.githubusercontent.com`). Pra publicar uma atualização:
 
-1. Buildar (`python build.py`).
-2. Criar uma Release no GitHub com tag `vX.Y.Z`.
-3. Anexar os `.exe` que mudaram (`start.exe`, `lobby.exe`, `in_game.exe`, `painel.exe`) e, se as imagens mudaram, um `language.zip` (zipando a pasta `language/` inteira).
+1. Mexer no que precisar (`lobby.py`, `in_game.py`, `painel.py`, imagens em `language/`, `coords_base.json`, etc).
+2. Subir a versão em `version.txt` (ex: `2.2.0` -> `2.2.1`).
+3. `git push` pra `main`.
 
-No próximo boot, `start.py` detecta a versão nova e atualiza sozinho (o próprio `start.exe` troca via um `.bat` temporário depois que o processo atual encerra).
+No próximo boot do `start.exe` em qualquer máquina, ele detecta a versão nova, baixa o repo (zipball) e sobrescreve só os arquivos de código/dados — nunca `config.json`, `status.json`, cache ou outro estado local. Como `lobby.py`/`in_game.py`/`painel.py` rodam como script, o código novo já vale na próxima vez que clicar em **Start**, sem rebuildar nem gerar instalador de novo.
+
+`start.py`/`updater.py` também são sincronizados no disco por completude, mas como `start.exe` é compilado, mudança neles só tem efeito depois de um `python build.py` + novo instalador manual — é o único caso que ainda exige isso.

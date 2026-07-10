@@ -1,5 +1,6 @@
 import os
 import sys
+import shutil
 import subprocess
 import json
 import tkinter as tk
@@ -25,6 +26,43 @@ CONFIG_FILE = "config.json"
 
 processo_lobby = None
 processo_painel = None
+
+
+def _find_python_cmd() -> list[str]:
+    """Comando pra rodar um .py (lobby.py/painel.py).
+
+    Quando start.py roda congelado como start.exe, sys.executable aponta
+    pro próprio start.exe — não é um interpretador python de verdade, então
+    `Popen([sys.executable, "lobby.py"])` só reabriria outro start.exe.
+    Isso só importa aqui: lobby.py/painel.py sempre rodam soltos (nunca
+    congelados), então o sys.executable deles já é o python real.
+    """
+    if not getattr(sys, "frozen", False):
+        return [sys.executable]
+    for candidate in ("pythonw.exe", "python.exe"):
+        path = shutil.which(candidate)
+        if path:
+            return [path]
+    py_launcher = shutil.which("py")
+    if py_launcher:
+        return [py_launcher, "-3"]
+    return ["python"]
+
+
+PYTHON_CMD = _find_python_cmd()
+
+
+def _cleanup_legacy_exes() -> None:
+    """Instalações antigas empacotavam lobby/in_game/painel como .exe também.
+    Se sobrar um desses no diretório, o check `os.path.exists("lobby.exe")`
+    em start()/_launch_in_game() prioriza ele pra sempre — o bot nunca cai
+    no .py atualizado via git. Remove uma vez, se existir."""
+    for legacy in ("lobby.exe", "in_game.exe", "painel.exe"):
+        if os.path.exists(legacy):
+            try:
+                os.remove(legacy)
+            except Exception:
+                pass
 
 # ==================================================
 # CONFIGURATIONS & LANGUAGES
@@ -190,34 +228,29 @@ def start() -> None:
     if os.path.exists("lobby.exe"):
         processo_lobby = subprocess.Popen(["lobby.exe", CONFIG_FILE], startupinfo=HIDDEN_WINDOW)
     else:
-        processo_lobby = subprocess.Popen([sys.executable, "lobby.py", CONFIG_FILE], startupinfo=HIDDEN_WINDOW)
+        processo_lobby = subprocess.Popen([*PYTHON_CMD, "lobby.py", CONFIG_FILE], startupinfo=HIDDEN_WINDOW)
 
     if os.path.exists("painel.exe"):
         processo_painel = subprocess.Popen(["painel.exe"], startupinfo=HIDDEN_WINDOW)
     else:
-        processo_painel = subprocess.Popen([sys.executable, "painel.py"], startupinfo=HIDDEN_WINDOW)
+        processo_painel = subprocess.Popen([*PYTHON_CMD, "painel.py"], startupinfo=HIDDEN_WINDOW)
 
     status_msg = TEXT.get("status_started", "Iniciado")
     label_status.config(text=f"{status_msg} ({language_folder})", foreground="green")
     root.after(1200, root.iconify)
 
 # ==================================================
-# AUTO-UPDATE (GitHub) — roda antes de qualquer coisa aparecer na tela
+# AUTO-UPDATE (git) — roda antes de qualquer coisa aparecer na tela
 # ==================================================
 def run_update_check() -> None:
     """
-    Confirma um self-update pendente do boot anterior e checa se há uma
-    versão nova no GitHub. Se o próprio start.exe precisar atualizar,
-    aplica a troca e encerra o processo atual (o .bat reabre o novo exe).
+    Compara o version.txt local com o da branch main no GitHub. Se houver
+    versão nova, baixa e sobrescreve lobby.py/in_game.py/painel.py/language/
+    etc na hora — como esses rodam como script (não .exe), o código novo já
+    vale no próximo Start, sem precisar rebuildar nada.
     Falhas de rede são silenciosas — o app sempre abre normalmente.
     """
-    updater.confirm_pending_version_if_any()
-
     resultado = updater.check_for_updates()
-
-    if resultado.self_update_ready and resultado.self_update_path:
-        updater.apply_self_update_and_restart(resultado.self_update_path)
-        os._exit(0)
 
     if resultado.updated:
         print(f"Atualizado para versão {resultado.remote_version} (arquivos: {resultado.updated_files})")
@@ -228,6 +261,7 @@ def run_update_check() -> None:
 # UI INITIALIZATION
 # ==================================================
 if __name__ == "__main__":
+    _cleanup_legacy_exes()
     run_update_check()
 
     root = tk.Tk()

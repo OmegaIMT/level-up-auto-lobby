@@ -1,12 +1,13 @@
 """
-build.py — Compila o projeto e copia language/ e level-up.ico para a raiz do dist.
+build.py — Compila start.exe e copia pro dist tudo que ele precisa achar do
+lado (source dos outros processos + dados), já que só start.exe é .exe.
 
 Uso:
     python build.py
 
-O PyInstaller por design joga arquivos DATA dentro de _internal/.
-Este script roda o build e depois move os arquivos para o lugar certo
-na raiz de dist/Dota-level-up-lobby/, onde os .exe esperam encontrá-los.
+lobby.py/in_game.py/painel.py rodam como script (não .exe) pra permitirem
+update via git sem rebuild (ver updater.py). Por isso precisam estar na
+raiz do dist junto do start.exe, não só empacotados dentro dele.
 """
 import os
 import sys
@@ -15,6 +16,20 @@ import subprocess
 
 DIST_NAME = "Dota-level-up-lobby"
 DIST_ROOT = os.path.join("dist", DIST_NAME)
+
+# Mesma lista que updater.py sincroniza via git — mantém dist e update
+# consistentes.
+SOURCE_FILES = [
+    "lobby.py",
+    "in_game.py",
+    "painel.py",
+    "updater.py",
+    "coords_base.json",
+    "requirements.txt",
+    "level-up.ico",
+    "version.txt",
+]
+SOURCE_DIRS = ["language"]
 
 
 def run_pyinstaller() -> None:
@@ -27,28 +42,28 @@ def run_pyinstaller() -> None:
 
 
 def copy_to_root() -> None:
-    # 1. Ícone
-    ico_src = "level-up.ico"
-    ico_dst = os.path.join(DIST_ROOT, "level-up.ico")
-    if os.path.exists(ico_src):
-        shutil.copy2(ico_src, ico_dst)
-        print(f"[OK] {ico_dst}")
+    for fname in SOURCE_FILES:
+        if not os.path.exists(fname):
+            continue
+        dst = os.path.join(DIST_ROOT, fname)
+        shutil.copy2(fname, dst)
+        print(f"[OK] {dst}")
 
-    # 2. Pasta language/
-    lang_src = "language"
-    lang_dst = os.path.join(DIST_ROOT, "language")
-    if os.path.exists(lang_src):
-        if os.path.exists(lang_dst):
-            shutil.rmtree(lang_dst)
-        shutil.copytree(lang_src, lang_dst)
-        print(f"[OK] {lang_dst}")
+    for dname in SOURCE_DIRS:
+        if not os.path.exists(dname):
+            continue
+        dst = os.path.join(DIST_ROOT, dname)
+        if os.path.exists(dst):
+            shutil.rmtree(dst)
+        shutil.copytree(dname, dst)
+        print(f"[OK] {dst}")
 
 
 if __name__ == "__main__":
     print("==> Compilando com PyInstaller...")
     run_pyinstaller()
 
-    print("==> Copiando arquivos para a raiz do dist...")
+    print("==> Copiando source/dados para a raiz do dist...")
     copy_to_root()
 
     print(f"\n Build concluído: dist/{DIST_NAME}/")

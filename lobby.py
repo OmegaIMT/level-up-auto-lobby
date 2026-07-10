@@ -94,6 +94,8 @@ _STATUS_DEFAULTS = {
     "ciclos": 0,
     "current_password": "",
     "password_deadline": 0.0,
+    "current_image": "",
+    "image_found": False,
 }
 
 
@@ -103,6 +105,8 @@ def save_status(
     ciclos: int | None = None,
     current_pw: str | None = None,
     password_deadline: float | None = None,
+    current_image: str | None = None,
+    image_found: bool | None = None,
 ) -> None:
     """Atualiza o status.json lido pelo painel.py fazendo MERGE."""
     with _status_lock:
@@ -119,12 +123,33 @@ def save_status(
             payload["current_password"] = current_pw
         if password_deadline is not None:
             payload["password_deadline"] = password_deadline
+        if current_image is not None:
+            payload["current_image"] = current_image
+        if image_found is not None:
+            payload["image_found"] = image_found
 
         try:
             with open(STATUS_FILE, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"Erro ao salvar {STATUS_FILE}: {e}")
+
+
+# Debug ao vivo (painel.py): qual imagem locate() buscou por último e se achou.
+# Throttle pra não gerar I/O em disco a cada 30ms do polling normal.
+_last_debug: tuple[str, bool] | None = None
+_last_debug_time = 0.0
+DEBUG_MIN_INTERVAL = 0.15
+
+
+def _update_debug(name: str, found: bool) -> None:
+    global _last_debug, _last_debug_time
+    now = time.time()
+    if _last_debug == (name, found) and (now - _last_debug_time) < DEBUG_MIN_INTERVAL:
+        return
+    _last_debug = (name, found)
+    _last_debug_time = now
+    save_status(current_image=name, image_found=found)
 
 
 SESSION = _load_session_config()
@@ -287,10 +312,12 @@ def locate(name: str, confidence: float = 0.7) -> Optional[tuple[int, int]]:
         )
         pos = _locate_raw(name, confidence, region=region)
         if pos:
+            _update_debug(name, True)
             return pos
         _cache_invalidate(name)
 
     pos = _locate_raw(name, confidence)
+    _update_debug(name, pos is not None)
     if pos:
         _cache_save_entry(name, pos[0], pos[1])
     return pos
