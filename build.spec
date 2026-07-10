@@ -23,7 +23,7 @@ def _exe(pyz, a, name):
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
-        upx=True,
+        upx=False,
         console=False,
         disable_windowed_traceback=False,
         argv_emulation=False,
@@ -54,7 +54,7 @@ coll = COLLECT(
     exe_lobby,   a_lobby.binaries,   a_lobby.datas,
     exe_painel,  a_painel.binaries,  a_painel.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name='Dota-level-up-lobby',
 )
