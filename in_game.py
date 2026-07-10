@@ -79,7 +79,7 @@ ERROR_CHECK_SECONDS = 600
 ERROR_DIR_NAME       = "error"
 
 # Janela de busca do evento após o início da partida.
-EVENTO_WAIT_FIRST = 480  # 8 min
+EVENTO_WAIT_FIRST = 360  # 6 min
 EVENTO_WAIT_RETRY = 120   # +2 min
 
 pyautogui.PAUSE    = 0.1
@@ -104,6 +104,35 @@ def save_status(partidas: int, rehost_max: int, ciclos: int) -> None:
     try:
         with open(STATUS_FILE, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+# Debug ao vivo (painel.py): qual imagem locate() buscou por último e se achou.
+# Throttle pra não gerar I/O em disco a cada poll rápido do loop.
+_debug_lock = threading.Lock()
+_last_debug: tuple[str, bool] | None = None
+_last_debug_time = 0.0
+DEBUG_MIN_INTERVAL = 0.15
+
+def _update_debug(name: str, found: bool) -> None:
+    global _last_debug, _last_debug_time
+    now = time.time()
+    with _debug_lock:
+        if _last_debug == (name, found) and (now - _last_debug_time) < DEBUG_MIN_INTERVAL:
+            return
+        _last_debug = (name, found)
+        _last_debug_time = now
+    try:
+        data = {}
+        if os.path.exists(STATUS_FILE):
+            with open(STATUS_FILE, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    data = loaded
+        data["current_image"] = name
+        data["image_found"] = found
+        with open(STATUS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
 
@@ -180,10 +209,12 @@ def locate(cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir:
         region: Region = (max(0, cx - CACHE_MARGIN), max(0, cy - CACHE_MARGIN), CACHE_MARGIN * 2, CACHE_MARGIN * 2)
         pos = _locate_raw(full_path, confidence, region=region)
         if pos:
+            _update_debug(cache_key, True)
             return pos
         _cache_invalidate(cache_key)
 
     pos = _locate_raw(full_path, confidence)
+    _update_debug(cache_key, pos is not None)
     if pos:
         _cache_save_entry(cache_key, pos[0], pos[1])
     return pos
@@ -523,7 +554,7 @@ def buscar_evento() -> None:
     """
     6 min após o início da partida, procura language/global/RESOLUTION/event/event.png.
     Se achar: clica uma vez e encerra.
-    Se não achar: tenta de novo depois de mais 1 min.
+    Se não achar: tenta de novo depois de mais 2 min.
     Se ainda assim não achar: encerra e só busca de novo na próxima partida
     (uma thread nova é criada a cada iniciar_partida()).
     """
