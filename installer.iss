@@ -5,7 +5,7 @@
 ;   "C:\Program Files\Inno Setup 7\ISCC.exe" installer.iss
 
 #define MyAppName "Dota Level Up Auto Lobby"
-#define MyAppVersion "2.1"
+#define MyAppVersion "2.2.2"
 #define MyAppPublisher "Bastos"
 #define MyAppExeName "start.exe"
 #define MyDistDir "dist\Dota-level-up-lobby"

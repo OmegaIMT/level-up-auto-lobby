@@ -22,7 +22,6 @@ DEFAULT_LANGUAGE = "pt-br"
 TEXT_DEFAULTS = {
     "rehost_label": "re-host",
     "ciclos_label": "ciclos",
-    "img_label": "img",
 }
 
 TEXT: dict = {}
@@ -95,16 +94,9 @@ def render(status: dict) -> None:
     partidas   = status.get("partidas", 0)
     rehost_max = status.get("rehost_max", 0)
     ciclos     = status.get("ciclos", 0)
-    img_name   = status.get("current_image", "")
-    img_found  = status.get("image_found", False)
 
     label_rehost.config(text=f"{TEXT.get('rehost_label', 're-host')} = {partidas}/{rehost_max}")
     label_ciclos.config(text=f"{TEXT.get('ciclos_label', 'ciclos')}  = {ciclos}")
-
-    if img_name:
-        tag = "OK" if img_found else "--"
-        color = "#00FF00" if img_found else "#FF4444"
-        label_img.config(text=f"{TEXT.get('img_label', 'img')}: {img_name} [{tag}]", fg=color)
 
 
 def poll() -> None:
@@ -115,7 +107,6 @@ def poll() -> None:
         no_data = TEXT.get("no_data", "--")
         label_rehost.config(text=f"{TEXT.get('rehost_label', 're-host')} = {no_data}/{no_data}")
         label_ciclos.config(text=f"{TEXT.get('ciclos_label', 'ciclos')}  = {no_data}")
-        label_img.config(text=f"{TEXT.get('img_label', 'img')}: {no_data}", fg="#00FF00")
 
     root.after(POLL_INTERVAL, poll)
 
@@ -149,13 +140,12 @@ if __name__ == "__main__":
     root.wm_attributes("-alpha", 0.80)
     root.configure(bg="black")
 
-    largura, altura = 260, 85
+    largura, altura = 260, 60
     pos_x = root.winfo_screenwidth() - largura - 20
     root.geometry(f"{largura}x{altura}+{pos_x}+20")
 
-    FONT       = ("Consolas", 11, "bold")
-    FONT_SMALL = ("Consolas", 9, "bold")
-    COLOR      = "#00FF00"
+    FONT  = ("Consolas", 11, "bold")
+    COLOR = "#00FF00"
 
     label_rehost = tk.Label(root, text="re-host = 0/0", fg=COLOR, bg="black",
                             font=FONT, anchor="w")
@@ -164,10 +154,6 @@ if __name__ == "__main__":
     label_ciclos = tk.Label(root, text="ciclos  = 0", fg=COLOR, bg="black",
                             font=FONT, anchor="w")
     label_ciclos.pack(fill="x", padx=10, pady=(0, 0))
-
-    label_img = tk.Label(root, text="img: --", fg=COLOR, bg="black",
-                            font=FONT_SMALL, anchor="w")
-    label_img.pack(fill="x", padx=10, pady=(4, 0))
 
     root.update()
     make_click_through(root)
