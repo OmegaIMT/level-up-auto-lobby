@@ -11,5 +11,8 @@
     "error_rehost": "重新主机必须是数字 ≥ 1",
     "footer": "© 2026 Bastos Develop. 保留所有权利。",
     "no_xp": "禁用经验值",
-    "support": "支持"
+    "support": "支持",
+    "status_checking_update": "正在检查更新...",
+    "status_update_found": "发现更新",
+    "status_downloading_update": "正在下载更新..."
 }

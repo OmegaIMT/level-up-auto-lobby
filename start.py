@@ -3,6 +3,8 @@ import sys
 import shutil
 import subprocess
 import json
+import queue
+import threading
 import tkinter as tk
 from tkinter import ttk
 
@@ -52,17 +54,18 @@ def _find_python_cmd() -> list[str]:
 PYTHON_CMD = _find_python_cmd()
 
 
-def _cleanup_legacy_exes() -> None:
-    """Instalações antigas empacotavam lobby/in_game/painel como .exe também.
-    Se sobrar um desses no diretório, o check `os.path.exists("lobby.exe")`
-    em start()/_launch_in_game() prioriza ele pra sempre — o bot nunca cai
-    no .py atualizado via git. Remove uma vez, se existir."""
-    for legacy in ("lobby.exe", "in_game.exe", "painel.exe", "version.txt.pending"):
-        if os.path.exists(legacy):
-            try:
-                os.remove(legacy)
-            except Exception:
-                pass
+def _cleanup_old_exe() -> None:
+    """updater.py não consegue sobrescrever start.exe em uso durante o
+    próprio update (Windows tranca o arquivo do processo rodando) — ele
+    renomeia o antigo pra start.exe.old e troca o novo no lugar. Limpa
+    esse resíduo aqui, já que agora (com start.exe já trocado) ninguém
+    mais usa ele."""
+    old_path = "start.exe.old"
+    if os.path.exists(old_path):
+        try:
+            os.remove(old_path)
+        except Exception:
+            pass
 
 # ==================================================
 # CONFIGURATIONS & LANGUAGES
@@ -240,29 +243,76 @@ def start() -> None:
     root.after(1200, root.iconify)
 
 # ==================================================
-# AUTO-UPDATE (git) — roda antes de qualquer coisa aparecer na tela
+# AUTO-UPDATE (Release) — roda em background depois que a UI já existe, pra
+# poder mostrar status/progresso sem travar a janela.
 # ==================================================
-def run_update_check() -> None:
+update_queue: "queue.Queue[tuple[str, int | None]]" = queue.Queue()
+
+def _update_worker() -> None:
     """
-    Compara o version.txt local com o da branch main no GitHub. Se houver
-    versão nova, baixa e sobrescreve lobby.py/in_game.py/painel.py/language/
-    etc na hora — como esses rodam como script (não .exe), o código novo já
-    vale no próximo Start, sem precisar rebuildar nada.
+    Compara o version.json local com o da branch main no GitHub. Se houver
+    versão nova, baixa o asset .zip da Release mais recente (build já
+    compilado com todos os .exe) e sobrescreve tudo. lobby.exe/in_game.exe/
+    painel.exe são trocados na hora; start.exe (em uso pelo processo atual)
+    só vale a partir do próximo start.
     Falhas de rede são silenciosas — o app sempre abre normalmente.
+    Roda em thread separada; só empilha eventos na fila (Tkinter não é
+    thread-safe pra mexer em widget direto daqui).
     """
-    resultado = updater.check_for_updates()
+    resultado = updater.check_for_updates(
+        progress_cb=lambda stage, percent=None: update_queue.put((stage, percent))
+    )
 
     if resultado.updated:
         print(f"Atualizado para versão {resultado.remote_version} (arquivos: {resultado.updated_files})")
     elif resultado.error:
         print(f"Update check: {resultado.error}")
 
+def _poll_update_queue() -> None:
+    try:
+        while True:
+            stage, percent = update_queue.get_nowait()
+            _apply_update_stage(stage, percent)
+    except queue.Empty:
+        pass
+    root.after(100, _poll_update_queue)
+
+def _apply_update_stage(stage: str, percent: int | None) -> None:
+    if stage == "checking":
+        label_status.config(text=TEXT.get("status_checking_update", "Buscando atualização..."), foreground="gray")
+    elif stage == "found":
+        label_status.config(text=TEXT.get("status_update_found", "Atualização encontrada"), foreground="gray")
+    elif stage == "downloading":
+        label_status.config(text=TEXT.get("status_downloading_update", "Baixando atualização..."), foreground="gray")
+        if not progress_bar.winfo_ismapped():
+            progress_bar.pack(fill="x", pady=(0, 5), before=label_footer)
+        if percent is None:
+            # GitHub manda o zip sem Content-Length — sem % pra calcular,
+            # mostra indeterminado em vez de travar em 0.
+            if progress_bar["mode"] != "indeterminate":
+                progress_bar["mode"] = "indeterminate"
+                progress_bar.start(15)
+        else:
+            if progress_bar["mode"] != "determinate":
+                progress_bar.stop()
+                progress_bar["mode"] = "determinate"
+            progress_bar["value"] = percent
+    elif stage in ("updated", "up_to_date", "error"):
+        progress_bar.stop()
+        progress_bar["mode"] = "determinate"
+        progress_bar.pack_forget()
+        progress_bar["value"] = 0
+        label_status.config(text="")
+
+def run_update_check_async() -> None:
+    threading.Thread(target=_update_worker, daemon=True).start()
+    root.after(100, _poll_update_queue)
+
 # ==================================================
 # UI INITIALIZATION
 # ==================================================
 if __name__ == "__main__":
-    _cleanup_legacy_exes()
-    run_update_check()
+    _cleanup_old_exe()
 
     root = tk.Tk()
     root.geometry("350x320")
@@ -336,6 +386,9 @@ if __name__ == "__main__":
     btn_start.pack(fill="x", pady=(0, 5))
     label_status = ttk.Label(frame, text="", foreground="gray")
     label_status.pack()
+    # Barra de progresso do auto-update — só aparece durante o download
+    # (ver _apply_update_stage). Fica entre o Start e o rodapé.
+    progress_bar = ttk.Progressbar(frame, orient="horizontal", mode="determinate", maximum=100)
     label_footer = ttk.Label(frame, font=("Arial", 9), foreground="black")
     label_footer.pack(side="bottom", pady=(5, 0))
 
@@ -346,4 +399,5 @@ if __name__ == "__main__":
     if saved_config:
         apply_saved_config(saved_config)
 
+    run_update_check_async()
     root.mainloop()

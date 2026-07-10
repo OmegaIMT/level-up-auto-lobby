@@ -11,5 +11,8 @@
     "error_rehost": "Re-Host must be a number ≥ 1",
     "footer": "© 2026 Bastos Develop. All rights reserved.",
     "no_xp": "Disable XP",
-    "support": "Support"
+    "support": "Support",
+    "status_checking_update": "Checking for update...",
+    "status_update_found": "Update found",
+    "status_downloading_update": "Downloading update..."
 }

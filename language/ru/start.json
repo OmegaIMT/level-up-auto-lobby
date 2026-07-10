@@ -11,5 +11,8 @@
     "error_rehost": "Ре-Хост должен быть числом ≥ 1",
     "footer": "© 2026 Bastos Develop. Все права защищены.",
     "no_xp": "Отключить XP",
-    "support": "Поддержка"
+    "support": "Поддержка",
+    "status_checking_update": "Поиск обновлений...",
+    "status_update_found": "Обновление найдено",
+    "status_downloading_update": "Загрузка обновления..."
 }

@@ -23,7 +23,7 @@ def _exe(pyz, a, name):
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
-        upx=False,
+        upx=True,
         console=False,
         disable_windowed_traceback=False,
         argv_emulation=False,
@@ -33,20 +33,28 @@ def _exe(pyz, a, name):
         icon=['level-up.ico'],
     )
 
-# lobby.py/in_game.py/painel.py NÃO são mais empacotados em .exe — rodam
-# como script direto (python lobby.py), lançados pelo start.exe. Assim o
-# updater consegue atualizar o código deles via git sem rebuild. Ver
-# updater.py e start.py (_find_python_cmd/PYTHON_CMD).
-a_start = _analysis('start.py')
+a_start   = _analysis('start.py')
+a_in_game = _analysis('in_game.py')
+a_lobby   = _analysis('lobby.py')
+a_painel  = _analysis('painel.py')
 
-pyz_start = PYZ(a_start.pure)
+pyz_start   = PYZ(a_start.pure)
+pyz_in_game = PYZ(a_in_game.pure)
+pyz_lobby   = PYZ(a_lobby.pure)
+pyz_painel  = PYZ(a_painel.pure)
 
-exe_start = _exe(pyz_start, a_start, 'start')
+exe_start   = _exe(pyz_start,   a_start,   'start')
+exe_in_game = _exe(pyz_in_game, a_in_game, 'in_game')
+exe_lobby   = _exe(pyz_lobby,   a_lobby,   'lobby')
+exe_painel  = _exe(pyz_painel,  a_painel,  'painel')
 
 coll = COLLECT(
-    exe_start, a_start.binaries, a_start.datas,
+    exe_start,   a_start.binaries,   a_start.datas,
+    exe_in_game, a_in_game.binaries, a_in_game.datas,
+    exe_lobby,   a_lobby.binaries,   a_lobby.datas,
+    exe_painel,  a_painel.binaries,  a_painel.datas,
     strip=False,
-    upx=False,
+    upx=True,
     upx_exclude=[],
     name='Dota-level-up-lobby',
 )
