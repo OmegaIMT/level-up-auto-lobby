@@ -185,7 +185,10 @@ def check_for_updates() -> UpdateResult:
     if not _version_is_newer(remote_version, local_version):
         return result  # já está na versão mais recente
 
-    zip_bytes = _request(ZIPBALL_URL, accept="application/octet-stream")
+    # A API do GitHub responde 415 pro zipball se pedir accept
+    # application/octet-stream (diferente do endpoint de asset de Release,
+    # que aceita) — aqui precisa do accept default da API.
+    zip_bytes = _request(ZIPBALL_URL)
     if zip_bytes is None:
         result.error = "falha ao baixar atualização"
         return result

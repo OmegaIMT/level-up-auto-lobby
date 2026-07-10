@@ -57,7 +57,7 @@ def _cleanup_legacy_exes() -> None:
     Se sobrar um desses no diretório, o check `os.path.exists("lobby.exe")`
     em start()/_launch_in_game() prioriza ele pra sempre — o bot nunca cai
     no .py atualizado via git. Remove uma vez, se existir."""
-    for legacy in ("lobby.exe", "in_game.exe", "painel.exe"):
+    for legacy in ("lobby.exe", "in_game.exe", "painel.exe", "version.txt.pending"):
         if os.path.exists(legacy):
             try:
                 os.remove(legacy)
