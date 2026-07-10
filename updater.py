@@ -197,8 +197,8 @@ def _get_latest_release_zip_url() -> Optional[str]:
 def _apply_update(extracted_root: str) -> List[str]:
     """Copia tudo de extracted_root pra raiz do projeto, exceto
     PROTECTED_PATHS (estado local). Retorna o que foi de fato atualizado.
-    start.exe é tratado à parte por _apply_update pra lidar com o arquivo
-    em uso (ver replace_running_exe)."""
+    start.exe (e _internal/, que ele carrega em memória) estão em uso pelo
+    próprio processo rodando o update — ver _safe_replace."""
     updated: List[str] = []
 
     for entry in os.listdir(extracted_root):
@@ -207,34 +207,28 @@ def _apply_update(extracted_root: str) -> List[str]:
         src = os.path.join(extracted_root, entry)
         dst = entry
 
-        if entry == "start.exe":
-            if not _replace_running_exe(src, dst):
-                continue
+        if _safe_replace(src, dst):
             updated.append(entry)
-            continue
-
-        try:
-            if os.path.isdir(src):
-                if os.path.exists(dst):
-                    shutil.rmtree(dst)
-                shutil.copytree(src, dst)
-            else:
-                shutil.copy2(src, dst)
-            updated.append(entry)
-        except Exception:
-            pass
 
     return updated
 
 
-def _replace_running_exe(src: str, dst: str) -> bool:
-    """start.exe é o processo rodando o updater — não dá pra sobrescrever
-    o arquivo em uso direto (Windows tranca a imagem). Renomeia o atual
-    pra .old (rename funciona em exe rodando) e coloca o novo no lugar;
-    o .old é limpo no próximo start (start.py:_cleanup_old_exe)."""
+def _safe_replace(src: str, dst: str) -> bool:
+    """Substitui dst (arquivo ou pasta) pelo conteúdo de src.
+
+    start.exe e _internal/ (DLLs/runtime compartilhado pelos 4 .exe) podem
+    estar em uso pelo processo que tá rodando esse update agora mesmo —
+    sobrescrever/rmtree em cima de arquivo travado pelo Windows corrompe a
+    instalação (apaga só parte da árvore). Por isso NUNCA apaga o que já
+    existe: sempre tenta renomear pra .old primeiro (rename funciona mesmo
+    com o arquivo em uso, só delete/write travam) e só então copia o novo
+    no lugar. O .old é limpo no próximo start (start.py:_cleanup_old_update_files).
+    """
+    is_dir = os.path.isdir(src)
+
     if not os.path.exists(dst):
         try:
-            shutil.copy2(src, dst)
+            shutil.copytree(src, dst) if is_dir else shutil.copy2(src, dst)
             return True
         except Exception:
             return False
@@ -242,11 +236,21 @@ def _replace_running_exe(src: str, dst: str) -> bool:
     old_path = dst + ".old"
     try:
         if os.path.exists(old_path):
-            os.remove(old_path)
+            shutil.rmtree(old_path) if os.path.isdir(old_path) else os.remove(old_path)
         os.rename(dst, old_path)
-        shutil.copy2(src, dst)
+    except Exception:
+        return False
+
+    try:
+        shutil.copytree(src, dst) if is_dir else shutil.copy2(src, dst)
         return True
     except Exception:
+        # não conseguiu colocar o novo no lugar — desfaz o rename pra não
+        # deixar a instalação sem esse arquivo/pasta.
+        try:
+            os.rename(old_path, dst)
+        except Exception:
+            pass
         return False
 
 

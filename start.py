@@ -54,18 +54,18 @@ def _find_python_cmd() -> list[str]:
 PYTHON_CMD = _find_python_cmd()
 
 
-def _cleanup_old_exe() -> None:
-    """updater.py não consegue sobrescrever start.exe em uso durante o
-    próprio update (Windows tranca o arquivo do processo rodando) — ele
-    renomeia o antigo pra start.exe.old e troca o novo no lugar. Limpa
-    esse resíduo aqui, já que agora (com start.exe já trocado) ninguém
+def _cleanup_old_update_files() -> None:
+    """updater.py não consegue sobrescrever start.exe/_internal em uso
+    durante o próprio update (Windows tranca arquivo/DLL do processo
+    rodando) — ele renomeia o antigo pra <nome>.old e troca o novo no
+    lugar. Limpa esse resíduo aqui, já que agora (já reiniciado) ninguém
     mais usa ele."""
-    old_path = "start.exe.old"
-    if os.path.exists(old_path):
-        try:
-            os.remove(old_path)
-        except Exception:
-            pass
+    for entry in os.listdir("."):
+        if entry.endswith(".old"):
+            try:
+                shutil.rmtree(entry) if os.path.isdir(entry) else os.remove(entry)
+            except Exception:
+                pass
 
 # ==================================================
 # CONFIGURATIONS & LANGUAGES
@@ -312,7 +312,7 @@ def run_update_check_async() -> None:
 # UI INITIALIZATION
 # ==================================================
 if __name__ == "__main__":
-    _cleanup_old_exe()
+    _cleanup_old_update_files()
 
     root = tk.Tk()
     root.geometry("350x320")
