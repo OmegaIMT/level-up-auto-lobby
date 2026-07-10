@@ -105,7 +105,7 @@ def build_installer(version: str) -> str | None:
         return None
 
     subprocess.run(
-        [iscc, f"/DMyAppVersion={version}", INSTALLER_SCRIPT],
+        [iscc, INSTALLER_SCRIPT, f"/DMyAppVersion={version}"],
         check=True,
     )
     setup_path = os.path.join("installer_output", f"Dota-Level-Up-Lobby-Setup-{version}.exe")
