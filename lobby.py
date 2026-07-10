@@ -43,6 +43,7 @@ POLL_ATT = 0.02  # intervalo entre cliques no botão de atualizar
 CLICK_PAUSE = 0.03  # pausa antes de cada clique
 FOCUS_WAIT = 0.8  # tempo para o Windows processar foco
 ATT_CYCLE_WAIT = 0.6  # espera após cada clique em ATT antes de checar
+ATT_CYCLE_WAIT_NO_CACHE = 2.5  # espera maior quando att.png ainda não tem coordenada em cache (dá tempo de ver a tela)
 MENU_STEP_WAIT = 0.25  # pausa entre cliques no menu (reduzida pela metade)
 SAIR_TIMEOUT = 1.5  # timeout do popup opcional "sair" (reduzido pela metade)
 
@@ -476,7 +477,8 @@ def _refresh_until_game_appears() -> bool:
         current_att = att
         while not stop_event.is_set() and not found_event.is_set():
             safe_click(current_att, pause=POLL_ATT)
-            if found_event.wait(timeout=ATT_CYCLE_WAIT):
+            wait_time = ATT_CYCLE_WAIT if "game.png" in _coord_cache else ATT_CYCLE_WAIT_NO_CACHE
+            if found_event.wait(timeout=wait_time):
                 return
             current_att = locate("att.png") or current_att
 
@@ -606,6 +608,7 @@ def main() -> None:
     open_dota()
     step_menu()
     step_password()
+    time.sleep(0.5)
     step_up_name()
     step_lobby()
 

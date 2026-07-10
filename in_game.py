@@ -79,7 +79,7 @@ ERROR_CHECK_SECONDS = 600
 ERROR_DIR_NAME       = "error"
 
 # Janela de busca do evento após o início da partida.
-EVENTO_WAIT_FIRST = 480  # 8 min
+EVENTO_WAIT_FIRST = 360  # 6 min
 EVENTO_WAIT_RETRY = 120   # +2 min
 
 pyautogui.PAUSE    = 0.1
@@ -521,7 +521,7 @@ def _bonus_watcher() -> None:
 # ==================================================
 def buscar_evento() -> None:
     """
-    8 min após o início da partida, procura language/global/RESOLUTION/event/event.png.
+    6 min após o início da partida, procura language/global/RESOLUTION/event/event.png.
     Se achar: clica uma vez e encerra.
     Se não achar: tenta de novo depois de mais 2 min.
     Se ainda assim não achar: encerra e só busca de novo na próxima partida

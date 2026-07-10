@@ -39,7 +39,6 @@ LANGUAGES = {
 RESOLUTIONS = {
     "1920x1080": "1920x1080",
     "1600x900": "1600x900",
-    "1366x768": "1366x768",
 }
 
 LANGUAGES_REVERSE = {v: k for k, v in LANGUAGES.items()}
