@@ -521,9 +521,9 @@ def _bonus_watcher() -> None:
 # ==================================================
 def buscar_evento() -> None:
     """
-    6 min após o início da partida, procura language/global/RESOLUTION/event/event.png.
+    8 min após o início da partida, procura language/global/RESOLUTION/event/event.png.
     Se achar: clica uma vez e encerra.
-    Se não achar: tenta de novo depois de mais 1 min.
+    Se não achar: tenta de novo depois de mais 2 min.
     Se ainda assim não achar: encerra e só busca de novo na próxima partida
     (uma thread nova é criada a cada iniciar_partida()).
     """
