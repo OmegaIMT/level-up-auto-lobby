@@ -2,6 +2,7 @@ venv/
 .venv/
 dist/
 build
+installer_output/
 __pycache__/
 *.pyc
 cache_in_game_*.txt

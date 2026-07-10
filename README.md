@@ -61,6 +61,17 @@ python build.py
 
 Roda o PyInstaller com `build.spec` e organiza `level-up.ico` e `language/` na raiz de `dist/Dota-level-up-lobby/`.
 
+## Instalador (Setup.exe)
+
+Requer [Inno Setup](https://jrsoftware.org/isinfo.php) instalado (`ISCC.exe`).
+
+```bash
+python build.py
+"C:\Program Files\Inno Setup 7\ISCC.exe" installer.iss
+```
+
+Gera `installer_output/Dota-Level-Up-Lobby-Setup-<versão>.exe`. O instalador deixa o usuário escolher a pasta de destino, com padrão `C:\Dota Level Up Auto Lobby`.
+
 ## Release / auto-update
 
 O `updater.py` consulta a última *Release* do repositório no GitHub. Pra publicar uma atualização:
