@@ -390,6 +390,9 @@ def monitorar_status() -> None:
                 if GOLD_BASE:
                     _click_at(*scale_coord(GOLD_BASE), delay=0.5)
 
+                if _stop_extras.is_set():
+                    break
+
                 hammer_pos = locate("hammer", "suporte", "hammer.png", confidence=0.8, base_dir=GLOBAL_DIR)
                 pill_pos = locate("pill", "suporte", "pill.png", confidence=0.8, base_dir=GLOBAL_DIR)
 
@@ -397,18 +400,31 @@ def monitorar_status() -> None:
                     if STATUS_11_BASE:
                         pos = scale_coord(STATUS_11_BASE)
                         for _ in range(3):
+                            if _stop_extras.is_set():
+                                break
                             _click_at(*pos, delay=0.5)
-                    if STATUS_12_BASE:
+                    if not _stop_extras.is_set() and STATUS_12_BASE:
                         pos = scale_coord(STATUS_12_BASE)
                         for _ in range(2):
+                            if _stop_extras.is_set():
+                                break
                             _click_at(*pos, delay=0.5)
+                    if _stop_extras.is_set():
+                        break
                     verificar_e_mover_itens_slots([0, 1, 2, 3])
                 else:
                     for status_base in STATUS_LIST_BASE:
+                        if _stop_extras.is_set():
+                            break
                         if status_base:
                             x, y = scale_coord(status_base)
                             _click_at(x, y, right=True, delay=0.1)
+                    if _stop_extras.is_set():
+                        break
                     verificar_e_mover_itens_slots([0, 1, 2, 3])
+
+                if _stop_extras.is_set():
+                    break
 
                 if GOLD_BASE:
                     _click_at(*scale_coord(GOLD_BASE), delay=0.5)
@@ -416,7 +432,7 @@ def monitorar_status() -> None:
             except Exception:
                 pass
 
-        time.sleep(POLL_STATUS)
+        _stop_extras.wait(POLL_STATUS)
 
 _tesouros_clicados: List[str] = []
 
@@ -452,15 +468,17 @@ def monitorar_tesouro() -> None:
             try:
                 pos_tesouro = encontrar_tesouro_principal()
 
-                if pos_tesouro:
+                if pos_tesouro and not _stop_extras.is_set():
                     click_pos(pos_tesouro, 0.5)
                     encontrou = False
 
                     # Sempre reinicia em 0.9 primeiro; só cai pra 0.6 se não achar.
                     for confianca in (0.9, 0.6):
-                        if encontrou:
+                        if encontrou or _stop_extras.is_set():
                             break
                         for img_nome in imagens_tesouro:
+                            if _stop_extras.is_set():
+                                break
                             if confianca == 0.9 and img_nome in _tesouros_clicados:
                                 continue
 
@@ -476,16 +494,18 @@ def monitorar_tesouro() -> None:
                                 _tesouros_clicados.append(img_nome)
                             # achou em 0.6 -> não entra na lista, continua elegível sempre
 
+                            if _stop_extras.is_set():
+                                break
                             time.sleep(0.5)
                             verificar_e_mover_itens()
                             break
 
-                    if not encontrou:
+                    if not encontrou and not _stop_extras.is_set():
                         click_centro_tela()
             except Exception:
                 pass
 
-        time.sleep(POLL_TESOURO)
+        _stop_extras.wait(POLL_TESOURO)
 
 def esperar_e_clicar_bonus(vezes: int = 1) -> None:
     restantes = vezes

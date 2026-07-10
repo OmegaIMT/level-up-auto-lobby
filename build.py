@@ -104,11 +104,18 @@ def build_installer(version: str) -> str | None:
               "Instala em https://jrsoftware.org/isdl.php pra habilitar essa etapa.")
         return None
 
+    setup_path = os.path.join("installer_output", f"Dota-Level-Up-Lobby-Setup-{version}.exe")
+    if os.path.exists(setup_path):
+        # Se uma compilação anterior falhou no meio (ex: antivírus travando
+        # a escrita do recurso de ícone), pode sobrar aqui um .exe parcial/
+        # corrompido. Remove antes pra garantir que o ISCC escreve um
+        # arquivo 100% novo, não tenta reaproveitar o que sobrou.
+        os.remove(setup_path)
+
     subprocess.run(
         [iscc, INSTALLER_SCRIPT, f"/DMyAppVersion={version}"],
         check=True,
     )
-    setup_path = os.path.join("installer_output", f"Dota-Level-Up-Lobby-Setup-{version}.exe")
     print(f"[OK] {setup_path}")
     return setup_path
 
