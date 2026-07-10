@@ -144,7 +144,7 @@ _IMG_DIR_NO_RES = os.path.join("language", LANGUAGE, "lobby")
 
 IMG_DIR = _IMG_DIR_WITH_RES if os.path.exists(_IMG_DIR_WITH_RES) else _IMG_DIR_NO_RES
 
-CACHE_FILE = "coords_cache.txt"
+CACHE_FILE = f"cache_lobby_{RESOLUTION}.txt"
 CACHE_MARGIN = 60  # px ao redor da coord salva para a região de busca rápida
 
 
@@ -200,6 +200,7 @@ def focus_dota() -> bool:
 # COORDINATE CACHE
 # ==================================================
 _coord_cache: dict[str, tuple[int, int]] = {}
+_cache_lock = threading.Lock()
 
 
 def _cache_load() -> None:
@@ -207,38 +208,44 @@ def _cache_load() -> None:
     if not os.path.exists(CACHE_FILE):
         return
     try:
-        with open(CACHE_FILE, "r") as f:
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if not line:
+                if not line or "=" not in line:
                     continue
-                parts = line.split(":")
-                if len(parts) == 3:
-                    name, x, y = parts
-                    _coord_cache[name] = (int(x), int(y))
+                name, coord = line.split("=", 1)
+                x_str, y_str = coord.split(",", 1)
+                _coord_cache[name] = (int(x_str), int(y_str))
     except Exception:
         pass
+
+
+def _cache_write() -> None:
+    # _clicker/_observer (threads paralelas em _refresh_until_game_appears) chamam
+    # locate() ao mesmo tempo; sem lock, duas escritas concorrentes no mesmo
+    # arquivo corrompem o cache (arquivo fica truncado/inválido).
+    with _cache_lock:
+        tmp_file = CACHE_FILE + ".tmp"
+        try:
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                for name, (cx, cy) in _coord_cache.items():
+                    f.write(f"{name}={cx},{cy}\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_file, CACHE_FILE)
+        except Exception:
+            pass
 
 
 def _cache_save_entry(name: str, x: int, y: int) -> None:
     _coord_cache[name] = (x, y)
-    try:
-        with open(CACHE_FILE, "w") as f:
-            for k, (cx, cy) in _coord_cache.items():
-                f.write(f"{k}:{cx}:{cy}\n")
-    except Exception:
-        pass
+    _cache_write()
 
 
 def _cache_invalidate(name: str) -> None:
     if name in _coord_cache:
         del _coord_cache[name]
-        try:
-            with open(CACHE_FILE, "w") as f:
-                for k, (cx, cy) in _coord_cache.items():
-                    f.write(f"{k}:{cx}:{cy}\n")
-        except Exception:
-            pass
+        _cache_write()
 
 
 # ==================================================
@@ -552,7 +559,14 @@ def step_lobby() -> None:
             inside_room = True
             continue
 
-        _refresh_until_game_appears()
+        refreshed = _refresh_until_game_appears()
+        if not refreshed:
+            safe_click(locate("image.png"))
+            time.sleep(MENU_STEP_WAIT)
+            safe_click(locate("lista.png"))
+            time.sleep(MENU_STEP_WAIT)
+            wait_for("200.png", timeout=30)
+            continue
 
         # Game encontrado → duplo-clique
         game = locate("game.png", confidence=0.7)

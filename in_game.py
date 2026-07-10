@@ -48,10 +48,10 @@ def save_config_update(**kwargs) -> None:
 
 LANGUAGE   = CONFIG.get("language", "pt-br")
 RESOLUTION = CONFIG.get("resolution", "1920x1080")
-NO_XP      = bool(CONFIG.get("no_xp", False))
-CRYSTAL    = bool(CONFIG.get("crystal", False))
-EQUIPMENT  = bool(CONFIG.get("equipment", False))
-SUPORTE    = bool(CONFIG.get("support", False))
+NO_XP      = bool(CONFIG.get("no_xp", True))
+CRYSTAL    = bool(CONFIG.get("crystal", True))
+EQUIPMENT  = bool(CONFIG.get("equipment", True))
+SUPORTE    = bool(CONFIG.get("support", True))
 
 # IMG_DIR: agora só guarda o que continua dependente de idioma (bonus, count).
 IMG_DIR = os.path.join("language", LANGUAGE, RESOLUTION, "in_game")
@@ -65,7 +65,7 @@ REHOST_MAX          = int(CONFIG.get("rehost_max", 5))
 CICLOS_FEITOS       = int(CONFIG.get("ciclos", 0))
 PARTIDAS_CONCLUIDAS = int(CONFIG.get("partidas_concluidas", 0))
 
-CACHE_FILE        = "coords_cache_ingame.txt"
+CACHE_FILE        = f"cache_in_game_{RESOLUTION}.txt"
 CACHE_MARGIN      = 60
 POLL_IN_GAME      = 2.0
 POLL_BONUS        = 3.0
@@ -79,8 +79,8 @@ ERROR_CHECK_SECONDS = 600
 ERROR_DIR_NAME       = "error"
 
 # Janela de busca do evento após o início da partida.
-EVENTO_WAIT_FIRST = 360  # 6 min
-EVENTO_WAIT_RETRY = 60   # +1 min
+EVENTO_WAIT_FIRST = 480  # 8 min
+EVENTO_WAIT_RETRY = 120   # +2 min
 
 pyautogui.PAUSE    = 0.1
 pyautogui.FAILSAFE = True
@@ -93,6 +93,9 @@ pyautogui.FAILSAFE = True
 # ==================================================
 _mouse_lock = threading.RLock()
 _stop_extras = threading.Event()
+
+# Serializa status/tesouro: uma vez por vez, nunca simultâneo (fila de espera).
+_extras_lock = threading.Lock()
 
 STATUS_FILE = "status.json"
 
@@ -116,38 +119,39 @@ def _cache_load() -> None:
     if not os.path.exists(CACHE_FILE):
         return
     try:
-        with open(CACHE_FILE, "r") as f:
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if not line:
+                if not line or "=" not in line:
                     continue
-                parts = line.split(":")
-                if len(parts) == 3:
-                    name, x, y = parts
-                    _coord_cache[name] = (int(x), int(y))
+                name, coord = line.split("=", 1)
+                x_str, y_str = coord.split(",", 1)
+                _coord_cache[name] = (int(x_str), int(y_str))
+    except Exception:
+        pass
+
+def _cache_write() -> None:
+    tmp_file = CACHE_FILE + ".tmp"
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            for name, (cx, cy) in _coord_cache.items():
+                f.write(f"{name}={cx},{cy}\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, CACHE_FILE)
     except Exception:
         pass
 
 def _cache_save_entry(name: str, x: int, y: int) -> None:
     with _cache_lock:
         _coord_cache[name] = (x, y)
-        try:
-            with open(CACHE_FILE, "w") as f:
-                for k, (cx, cy) in _coord_cache.items():
-                    f.write(f"{k}:{cx}:{cy}\n")
-        except Exception:
-            pass
+        _cache_write()
 
 def _cache_invalidate(name: str) -> None:
     with _cache_lock:
         if name in _coord_cache:
             del _coord_cache[name]
-            try:
-                with open(CACHE_FILE, "w") as f:
-                    for k, (cx, cy) in _coord_cache.items():
-                        f.write(f"{k}:{cx}:{cy}\n")
-            except Exception:
-                pass
+            _cache_write()
 
 Region = tuple[int, int, int, int]
 
@@ -196,7 +200,7 @@ def descansar_mouse() -> None:
     except Exception:
         pass
 
-def _click_at(x: int, y: int, right: bool = False, delay: float = 0.1) -> None:
+def _click_at(x: int, y: int, right: bool = False, delay: float = 0.1, rest: bool = True) -> None:
     try:
         with _mouse_lock:
             pyautogui.moveTo(x, y)
@@ -206,12 +210,13 @@ def _click_at(x: int, y: int, right: bool = False, delay: float = 0.1) -> None:
             else:
                 pyautogui.click()
             time.sleep(delay)
-            descansar_mouse()
+            if rest:
+                descansar_mouse()
     except Exception:
         pass
 
-def click_pos(pos: tuple[int, int], delay_after: float = 0.3) -> None:
-    _click_at(pos[0], pos[1], delay=delay_after)
+def click_pos(pos: tuple[int, int], delay_after: float = 0.3, rest: bool = True) -> None:
+    _click_at(pos[0], pos[1], delay=delay_after, rest=rest)
 
 def click_centro_tela() -> None:
     w, h = pyautogui.size()
@@ -349,35 +354,36 @@ def subir_status() -> None:
 
 def monitorar_status() -> None:
     while not _stop_extras.is_set():
-        try:
-            if GOLD_BASE:
-                _click_at(*scale_coord(GOLD_BASE), delay=0.5)
+        with _extras_lock:
+            try:
+                if GOLD_BASE:
+                    _click_at(*scale_coord(GOLD_BASE), delay=0.5)
 
-            hammer_pos = locate("hammer", "suporte", "hammer.png", confidence=0.75, base_dir=GLOBAL_DIR)
-            pill_pos = locate("pill", "suporte", "pill.png", confidence=0.75, base_dir=GLOBAL_DIR)
+                hammer_pos = locate("hammer", "suporte", "hammer.png", confidence=0.8, base_dir=GLOBAL_DIR)
+                pill_pos = locate("pill", "suporte", "pill.png", confidence=0.8, base_dir=GLOBAL_DIR)
 
-            if hammer_pos or pill_pos:
-                if STATUS_11_BASE:
-                    pos = scale_coord(STATUS_11_BASE)
-                    for _ in range(3):
-                        _click_at(*pos, delay=0.5)
-                if STATUS_12_BASE:
-                    pos = scale_coord(STATUS_12_BASE)
-                    for _ in range(2):
-                        _click_at(*pos, delay=0.5)
-                verificar_e_mover_itens_slots([0, 1, 2, 3])
-            else:
-                for status_base in STATUS_LIST_BASE:
-                    if status_base:
-                        x, y = scale_coord(status_base)
-                        _click_at(x, y, right=True, delay=0.1)
-                verificar_e_mover_itens_slots([0, 1, 2, 3])
+                if hammer_pos or pill_pos:
+                    if STATUS_11_BASE:
+                        pos = scale_coord(STATUS_11_BASE)
+                        for _ in range(3):
+                            _click_at(*pos, delay=0.5)
+                    if STATUS_12_BASE:
+                        pos = scale_coord(STATUS_12_BASE)
+                        for _ in range(2):
+                            _click_at(*pos, delay=0.5)
+                    verificar_e_mover_itens_slots([0, 1, 2, 3])
+                else:
+                    for status_base in STATUS_LIST_BASE:
+                        if status_base:
+                            x, y = scale_coord(status_base)
+                            _click_at(x, y, right=True, delay=0.1)
+                    verificar_e_mover_itens_slots([0, 1, 2, 3])
 
-            if GOLD_BASE:
-                _click_at(*scale_coord(GOLD_BASE), delay=0.5)
+                if GOLD_BASE:
+                    _click_at(*scale_coord(GOLD_BASE), delay=0.5)
 
-        except Exception:
-            pass
+            except Exception:
+                pass
 
         time.sleep(POLL_STATUS)
 
@@ -397,7 +403,7 @@ def carregar_imagens_tesouro() -> List[str]:
     return [img[1] for img in imagens]
 
 def encontrar_tesouro_principal() -> Optional[tuple[int, int]]:
-    for conf in (0.75, 0.7, 0.65, 0.6):
+    for conf in (0.85, 0.8, 0.75, 0.6):
         pos = locate("tesouro", "suporte", "tesouro.png", confidence=conf, base_dir=GLOBAL_DIR)
         if pos:
             return pos
@@ -411,38 +417,42 @@ def monitorar_tesouro() -> None:
         return
 
     while not _stop_extras.is_set():
-        try:
-            pos_tesouro = encontrar_tesouro_principal()
+        with _extras_lock:
+            try:
+                pos_tesouro = encontrar_tesouro_principal()
 
-            if pos_tesouro:
-                click_pos(pos_tesouro, 0.5)
-                encontrou = False
+                if pos_tesouro:
+                    click_pos(pos_tesouro, 0.5)
+                    encontrou = False
 
-                for confianca in (0.75, 0.6):
-                    if encontrou:
-                        break
-                    for img_nome in imagens_tesouro:
-                        if confianca == 0.75 and img_nome in _tesouros_clicados:
-                            continue
+                    # Sempre reinicia em 0.9 primeiro; só cai pra 0.6 se não achar.
+                    for confianca in (0.9, 0.6):
+                        if encontrou:
+                            break
+                        for img_nome in imagens_tesouro:
+                            if confianca == 0.9 and img_nome in _tesouros_clicados:
+                                continue
 
-                        img_path = os.path.join(GLOBAL_DIR, "suporte", "tesouro", img_nome)
-                        pos = _locate_raw(img_path, confidence=confianca)
-                        if not pos:
-                            continue
+                            img_path = os.path.join(GLOBAL_DIR, "suporte", "tesouro", img_nome)
+                            pos = _locate_raw(img_path, confidence=confianca)
+                            if not pos:
+                                continue
 
-                        encontrou = True
-                        click_pos(pos, 0.5)
-                        if confianca == 0.75:
-                            _tesouros_clicados.append(img_nome)
+                            encontrou = True
+                            click_pos(pos, 0.5)
+                            if confianca == 0.9:
+                                # achou com confiança alta -> não busca essa de novo (mais rápido)
+                                _tesouros_clicados.append(img_nome)
+                            # achou em 0.6 -> não entra na lista, continua elegível sempre
 
-                        time.sleep(0.5)
-                        verificar_e_mover_itens()
-                        break
+                            time.sleep(0.5)
+                            verificar_e_mover_itens()
+                            break
 
-                if not encontrou:
-                    click_centro_tela()
-        except Exception:
-            pass
+                    if not encontrou:
+                        click_centro_tela()
+            except Exception:
+                pass
 
         time.sleep(POLL_TESOURO)
 
@@ -522,7 +532,7 @@ def buscar_evento() -> None:
 
     pos = _locate_raw(_global_img("event", "event.png"), confidence=0.75)
     if pos:
-        click_pos(pos, 0.3)
+        click_pos(pos, 0.3, rest=False)
         return
 
     if _stop_extras.wait(timeout=EVENTO_WAIT_RETRY):
@@ -530,7 +540,7 @@ def buscar_evento() -> None:
 
     pos = _locate_raw(_global_img("event", "event.png"), confidence=0.75)
     if pos:
-        click_pos(pos, 0.3)
+        click_pos(pos, 0.3, rest=False)
     # se não achar na segunda tentativa, encerra sem fazer nada
 
 # ==================================================
