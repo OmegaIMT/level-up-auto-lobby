@@ -78,9 +78,10 @@ TIMEOUT_SEM_COUNT = 4800
 ERROR_CHECK_SECONDS = 600
 ERROR_DIR_NAME       = "error"
 
-# Janela de busca do evento após o início da partida.
+# Espera antes de começar a procurar o evento após o início da partida;
+# depois disso, busca contínua (ver buscar_evento).
 EVENTO_WAIT_FIRST = 360  # 6 min
-EVENTO_WAIT_RETRY = 120   # +2 min
+EVENTO_POLL = 5.0
 
 pyautogui.PAUSE    = 0.1
 pyautogui.FAILSAFE = True
@@ -378,7 +379,12 @@ def subir_status() -> None:
     gold_pos = scale_coord(GOLD_BASE)
     status_pos = scale_coord(STATUS_BASE)
 
-    _click_at(*gold_pos, delay=0.5)
+    # Se a loja (shop.png) já tá aberta, o clique inicial no gold fecha ela
+    # à toa — pula e só clica no gold no fim, igual antes.
+    loja_aberta = locate("shop", "shop.png", confidence=0.75) is not None
+
+    if not loja_aberta:
+        _click_at(*gold_pos, delay=0.5)
     for _ in range(8):
         _click_at(*status_pos, delay=0.5)
     _click_at(*gold_pos, delay=0.5)
@@ -387,7 +393,9 @@ def monitorar_status() -> None:
     while not _stop_extras.is_set():
         with _extras_lock:
             try:
-                if GOLD_BASE:
+                loja_aberta = locate("shop", "shop.png", confidence=0.75) is not None
+
+                if GOLD_BASE and not loja_aberta:
                     _click_at(*scale_coord(GOLD_BASE), delay=0.5)
 
                 if _stop_extras.is_set():
@@ -572,27 +580,21 @@ def _bonus_watcher() -> None:
 # ==================================================
 def buscar_evento() -> None:
     """
-    6 min após o início da partida, procura language/global/RESOLUTION/event/event.png.
-    Se achar: clica uma vez e encerra.
-    Se não achar: tenta de novo depois de mais 2 min.
-    Se ainda assim não achar: encerra e só busca de novo na próxima partida
-    (uma thread nova é criada a cada iniciar_partida()).
+    6 min após o início da partida, começa a procurar
+    language/global/RESOLUTION/event/event.png continuamente. Só para
+    quando achar (clica e encerra) ou quando a partida encerra (count.png
+    achado -> _stop_extras, ver monitor_match).
     """
     if _stop_extras.wait(timeout=EVENTO_WAIT_FIRST):
-        return  # partida encerrou antes da primeira checagem
+        return  # partida encerrou antes de começar a procurar
 
-    pos = _locate_raw(_global_img("event", "event.png"), confidence=0.75)
-    if pos:
-        click_pos(pos, 0.3, rest=False)
-        return
-
-    if _stop_extras.wait(timeout=EVENTO_WAIT_RETRY):
-        return  # partida encerrou antes da segunda checagem
-
-    pos = _locate_raw(_global_img("event", "event.png"), confidence=0.75)
-    if pos:
-        click_pos(pos, 0.3, rest=False)
-    # se não achar na segunda tentativa, encerra sem fazer nada
+    while not _stop_extras.is_set():
+        pos = _locate_raw(_global_img("event", "event.png"), confidence=0.75)
+        if pos:
+            click_pos(pos, 0.3, rest=False)
+            return
+        if _stop_extras.wait(timeout=EVENTO_POLL):
+            return  # partida encerrou enquanto procurava
 
 # ==================================================
 # ERRO (global, independe de idioma)
