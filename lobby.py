@@ -171,7 +171,16 @@ _IMG_DIR_NO_RES = os.path.join("language", LANGUAGE, "lobby")
 IMG_DIR = _IMG_DIR_WITH_RES if os.path.exists(_IMG_DIR_WITH_RES) else _IMG_DIR_NO_RES
 
 CACHE_FILE = f"cache_lobby_{RESOLUTION}.txt"
-CACHE_MARGIN = 60  # px ao redor da coord salva para a região de busca rápida
+
+# Margem escala com a largura da tela: em resoluções ultrawide a lista de
+# lobbies desloca mais os itens, e a janela de 60px (base 1920x1080) errava
+# o alvo com mais frequência, caindo no fallback de scan em tela cheia
+# (bem mais caro em telas maiores) — daí a demora reportada em 3440x1440.
+try:
+    _RES_WIDTH = int(RESOLUTION.lower().split("x")[0])
+except Exception:
+    _RES_WIDTH = 1920
+CACHE_MARGIN = max(60, round(60 * _RES_WIDTH / 1920))  # px ao redor da coord salva para a região de busca rápida
 
 
 def current_password() -> str:

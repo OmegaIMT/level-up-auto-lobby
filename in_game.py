@@ -66,7 +66,11 @@ CICLOS_FEITOS       = int(CONFIG.get("ciclos", 0))
 PARTIDAS_CONCLUIDAS = int(CONFIG.get("partidas_concluidas", 0))
 
 CACHE_FILE        = f"cache_in_game_{RESOLUTION}.txt"
-CACHE_MARGIN      = 60
+try:
+    _RES_WIDTH = int(RESOLUTION.lower().split("x")[0])
+except Exception:
+    _RES_WIDTH = 1920
+CACHE_MARGIN      = max(60, round(60 * _RES_WIDTH / 1920))  # escala com a resolução (ver lobby.py)
 POLL_IN_GAME      = 2.0
 POLL_BONUS        = 3.0
 POLL_TESOURO      = 10.0
@@ -293,7 +297,7 @@ BACKPACK_SLOTS_BASE: list[tuple[int, int]] = [
 ][:2]
 
 RESOLUTION_OFFSET = {
-    "3440x1440": (50, -25),  # (x, y) em px: + direita / + baixo
+    "3440x1440": (28, -10),  # (x, y) em px: + direita / + baixo
 }
 
 def scale_coord(coord_base: tuple[int, int]) -> tuple[int, int]:
