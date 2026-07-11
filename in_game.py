@@ -393,7 +393,9 @@ def monitorar_status() -> None:
     while not _stop_extras.is_set():
         with _extras_lock:
             try:
-                if GOLD_BASE:
+                loja_aberta = locate("shop", "shop.png", confidence=0.75) is not None
+
+                if GOLD_BASE and not loja_aberta:
                     _click_at(*scale_coord(GOLD_BASE), delay=0.5)
 
                 if _stop_extras.is_set():
