@@ -293,7 +293,7 @@ BACKPACK_SLOTS_BASE: list[tuple[int, int]] = [
 ][:2]
 
 RESOLUTION_OFFSET = {
-    "3440x1440": (12, -17),  # (x, y) em px: + direita / + baixo
+    "3440x1440": (50, -25),  # (x, y) em px: + direita / + baixo
 }
 
 def scale_coord(coord_base: tuple[int, int]) -> tuple[int, int]:
