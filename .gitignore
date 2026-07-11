@@ -16,3 +16,4 @@ config.json
 status.json
 skills-lock.json
 .agents
+.vscode
