@@ -272,13 +272,39 @@ def load_coords_base() -> dict:
     except Exception:
         return {}
 
-COORDS_BASE = load_coords_base()
+COORDS_ALL = load_coords_base()
 
-_captured_res = COORDS_BASE.get("captured_resolution", "1920x1080")
-BASE_WIDTH, BASE_HEIGHT = (int(v) for v in _captured_res.split("x"))
+BASE_RES = "1920x1080"
+BASE_WIDTH, BASE_HEIGHT = (int(v) for v in BASE_RES.split("x"))
+BASE_COORDS = COORDS_ALL.get(BASE_RES, {})
+
+# Bloco com coordenadas reais da resolução atual (ex: "3440x1440"), se existir
+# em coords_base.json. Quando existe, usamos direto - sem fórmula, sem chute.
+RES_COORDS = COORDS_ALL.get(RESOLUTION.lower()) or COORDS_ALL.get(RESOLUTION) or {}
+
+def _scale_from_base(coord_base: tuple[int, int]) -> tuple[int, int]:
+    """
+    Fallback só usado quando a resolução atual não tem bloco próprio em
+    coords_base.json. Dota (Source 2) não estica o HUD na horizontal em
+    telas ultrawide: o HUD escala só com a altura e fica centralizado,
+    sobrando viewport 3D nas laterais ("vert-") - por isso escala só por
+    tw/th proporcional à altura (k) e centraliza o x.
+    """
+    bx, by = coord_base
+    try:
+        tw, th = (int(v) for v in RESOLUTION.lower().split("x"))
+    except Exception:
+        tw, th = BASE_WIDTH, BASE_HEIGHT
+    k = th / BASE_HEIGHT
+    margin_x = (tw - BASE_WIDTH * k) / 2
+    return int(round(margin_x + bx * k)), int(round(by * k))
 
 def _c(key: str) -> Optional[tuple[int, int]]:
-    return tuple(COORDS_BASE[key]) if key in COORDS_BASE else None
+    if key in RES_COORDS:
+        return tuple(RES_COORDS[key])
+    if key in BASE_COORDS:
+        return _scale_from_base(tuple(BASE_COORDS[key]))
+    return None
 
 SLOT_20_BASE = _c("slot_20")
 
@@ -293,29 +319,13 @@ STATUS_11_BASE = STATUS_LIST_BASE[10]
 STATUS_12_BASE = STATUS_LIST_BASE[11]
 
 BACKPACK_SLOTS_BASE: list[tuple[int, int]] = [
-    tuple(COORDS_BASE[k]) for k in sorted(COORDS_BASE.keys()) if k.startswith("slot_")
+    _c(k) for k in sorted(BASE_COORDS.keys()) if k.startswith("slot_")
 ][:2]
 
-RESOLUTION_OFFSET = {
-    "3440x1440": (18, -10),  # (x, y) em px: + direita / + baixo
-}
-
-def scale_coord(coord_base: tuple[int, int]) -> tuple[int, int]:
-    bx, by = coord_base
-    try:
-        tw, th = (int(v) for v in RESOLUTION.lower().split("x"))
-    except Exception:
-        tw, th = BASE_WIDTH, BASE_HEIGHT
-    sx = tw / BASE_WIDTH
-    sy = th / BASE_HEIGHT
-    x, y = int(round(bx * sx)), int(round(by * sy))
-
-    off = RESOLUTION_OFFSET.get(RESOLUTION.lower())
-    if off:
-        x += off[0]
-        y += off[1]
-
-    return x, y
+def scale_coord(coord_final: tuple[int, int]) -> tuple[int, int]:
+    """As *_BASE acima já vêm resolvidas pra RESOLUTION atual (via _c) - esta
+    função só existe pra não quebrar as chamadas espalhadas pelo arquivo."""
+    return coord_final
 
 def drag_item(src: tuple[int, int], dst: tuple[int, int], duration: float = 0.15) -> None:
     sx, sy = src
