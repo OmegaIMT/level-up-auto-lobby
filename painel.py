@@ -22,6 +22,8 @@ DEFAULT_LANGUAGE = "pt-br"
 TEXT_DEFAULTS = {
     "rehost_label": "re-host",
     "ciclos_label": "ciclos",
+    "exit_label": "exit",
+    "esc_key": "esc",
 }
 
 TEXT: dict = {}
@@ -97,6 +99,7 @@ def render(status: dict) -> None:
 
     label_rehost.config(text=f"{TEXT.get('rehost_label', 're-host')} = {partidas}/{rehost_max}")
     label_ciclos.config(text=f"{TEXT.get('ciclos_label', 'ciclos')}  = {ciclos}")
+    label_exit.config(text=f"{TEXT.get('exit_label', 'exit')}  = {TEXT.get('esc_key', 'esc')}")
 
 
 def poll() -> None:
@@ -107,6 +110,7 @@ def poll() -> None:
         no_data = TEXT.get("no_data", "--")
         label_rehost.config(text=f"{TEXT.get('rehost_label', 're-host')} = {no_data}/{no_data}")
         label_ciclos.config(text=f"{TEXT.get('ciclos_label', 'ciclos')}  = {no_data}")
+        label_exit.config(text=f"{TEXT.get('exit_label', 'exit')}  = {TEXT.get('esc_key', 'esc')}")
 
     root.after(POLL_INTERVAL, poll)
 
@@ -140,7 +144,7 @@ if __name__ == "__main__":
     root.wm_attributes("-alpha", 0.80)
     root.configure(bg="black")
 
-    largura, altura = 260, 60
+    largura, altura = 260, 80
     pos_x = root.winfo_screenwidth() - largura - 20
     root.geometry(f"{largura}x{altura}+{pos_x}+20")
 
@@ -154,6 +158,10 @@ if __name__ == "__main__":
     label_ciclos = tk.Label(root, text="ciclos  = 0", fg=COLOR, bg="black",
                             font=FONT, anchor="w")
     label_ciclos.pack(fill="x", padx=10, pady=(0, 0))
+
+    label_exit = tk.Label(root, text="exit  = esc", fg=COLOR, bg="black",
+                          font=FONT, anchor="w")
+    label_exit.pack(fill="x", padx=10, pady=(0, 5))
 
     root.update()
     make_click_through(root)

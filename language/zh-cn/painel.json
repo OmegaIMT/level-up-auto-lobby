@@ -1,4 +1,6 @@
 {
     "rehost_label": "重新建房",
-    "ciclos_label": "循环"
+    "ciclos_label": "循环",
+    "exit_label": "退出",
+    "esc_key": "Esc"
 }

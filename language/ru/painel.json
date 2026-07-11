@@ -1,4 +1,6 @@
 {
     "rehost_label": "re-host",
-    "ciclos_label": "циклы"
+    "ciclos_label": "циклы",
+    "exit_label": "выход",
+    "esc_key": "Esc"
 }

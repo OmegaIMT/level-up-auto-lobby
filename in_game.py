@@ -385,8 +385,30 @@ def subir_status() -> None:
 
     if not loja_aberta:
         _click_at(*gold_pos, delay=0.5)
-    for _ in range(8):
-        _click_at(*status_pos, delay=0.5)
+
+    hammer_pos = locate("hammer", "suporte", "hammer.png", confidence=0.8, base_dir=GLOBAL_DIR)
+    pill_pos = locate("pill", "suporte", "pill.png", confidence=0.8, base_dir=GLOBAL_DIR)
+
+    if hammer_pos or pill_pos:
+        if STATUS_11_BASE:
+            pos = scale_coord(STATUS_11_BASE)
+            for _ in range(3):
+                _click_at(*pos, delay=0.5)
+        if STATUS_12_BASE:
+            pos = scale_coord(STATUS_12_BASE)
+            for _ in range(2):
+                _click_at(*pos, delay=0.5)
+    else:
+        shop_global_pos = locate("shop_global", "shop.png", confidence=0.75, base_dir=GLOBAL_DIR)
+        if not shop_global_pos:
+            for _ in range(8):
+                _click_at(*status_pos, delay=0.5)
+        else:
+            for status_base in STATUS_LIST_BASE:
+                if status_base:
+                    x, y = scale_coord(status_base)
+                    _click_at(x, y, right=True, delay=0.1)
+
     _click_at(*gold_pos, delay=0.5)
 
 def monitorar_status() -> None:
@@ -421,12 +443,20 @@ def monitorar_status() -> None:
                         break
                     verificar_e_mover_itens_slots([0, 1, 2, 3])
                 else:
-                    for status_base in STATUS_LIST_BASE:
-                        if _stop_extras.is_set():
-                            break
-                        if status_base:
-                            x, y = scale_coord(status_base)
-                            _click_at(x, y, right=True, delay=0.1)
+                    shop_global_pos = locate("shop_global", "shop.png", confidence=0.75, base_dir=GLOBAL_DIR)
+                    if not shop_global_pos and STATUS_BASE:
+                        pos = scale_coord(STATUS_BASE)
+                        for _ in range(8):
+                            if _stop_extras.is_set():
+                                break
+                            _click_at(*pos, delay=0.5)
+                    else:
+                        for status_base in STATUS_LIST_BASE:
+                            if _stop_extras.is_set():
+                                break
+                            if status_base:
+                                x, y = scale_coord(status_base)
+                                _click_at(x, y, right=True, delay=0.1)
                     if _stop_extras.is_set():
                         break
                     verificar_e_mover_itens_slots([0, 1, 2, 3])
