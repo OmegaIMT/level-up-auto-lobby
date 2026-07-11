@@ -292,6 +292,10 @@ BACKPACK_SLOTS_BASE: list[tuple[int, int]] = [
     tuple(COORDS_BASE[k]) for k in sorted(COORDS_BASE.keys()) if k.startswith("slot_")
 ][:2]
 
+RESOLUTION_OFFSET = {
+    "3440x1440": (12, -17),  # (x, y) em px: + direita / + baixo
+}
+
 def scale_coord(coord_base: tuple[int, int]) -> tuple[int, int]:
     bx, by = coord_base
     try:
@@ -300,7 +304,14 @@ def scale_coord(coord_base: tuple[int, int]) -> tuple[int, int]:
         tw, th = BASE_WIDTH, BASE_HEIGHT
     sx = tw / BASE_WIDTH
     sy = th / BASE_HEIGHT
-    return int(round(bx * sx)), int(round(by * sy))
+    x, y = int(round(bx * sx)), int(round(by * sy))
+
+    off = RESOLUTION_OFFSET.get(RESOLUTION.lower())
+    if off:
+        x += off[0]
+        y += off[1]
+
+    return x, y
 
 def drag_item(src: tuple[int, int], dst: tuple[int, int], duration: float = 0.15) -> None:
     sx, sy = src
