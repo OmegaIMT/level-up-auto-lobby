@@ -319,7 +319,7 @@ STATUS_11_BASE = STATUS_LIST_BASE[10]
 STATUS_12_BASE = STATUS_LIST_BASE[11]
 
 BACKPACK_SLOTS_BASE: list[tuple[int, int]] = [
-    _c(k) for k in sorted(BASE_COORDS.keys()) if k.startswith("slot_")
+    pos for k in sorted(BASE_COORDS.keys()) if k.startswith("slot_") and (pos := _c(k)) is not None
 ][:2]
 
 def scale_coord(coord_final: tuple[int, int]) -> tuple[int, int]:
