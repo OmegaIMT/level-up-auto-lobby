@@ -77,6 +77,11 @@ POLL_TESOURO      = 10.0
 POLL_STATUS       = 30.0
 TIMEOUT_SEM_COUNT = 4800
 
+# Tempo (s) esperando fonte.png aparecer após count sumir (fim de partida
+# concluída). Se estourar, mesmo fluxo dos outros timeouts: fecha dota,
+# chama lobby de novo.
+TIMEOUT_SEM_FONTE = 1800
+
 # Tempo (s) sem ver count.png a partir do qual passamos a checar as imagens
 # de erro na pasta global "error".
 ERROR_CHECK_SECONDS = 600
@@ -696,8 +701,15 @@ def monitor_match() -> None:
                 disconnect_and_relaunch()
                 return
 
-            # Espera a próxima partida começar
-            wait_for_match_start(timeout=None)
+            # Espera a próxima partida começar (fonte.png). Se fonte não
+            # aparecer em TIMEOUT_SEM_FONTE, mesmo fluxo dos outros
+            # timeouts: fecha dota, chama lobby de novo.
+            if not wait_for_match_start(timeout=TIMEOUT_SEM_FONTE):
+                CICLOS_FEITOS += 1
+                save_status(0, REHOST_MAX, CICLOS_FEITOS)
+                save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
+                disconnect_and_relaunch()
+                return
 
             iniciar_partida()
 
