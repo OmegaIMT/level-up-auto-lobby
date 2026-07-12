@@ -64,10 +64,8 @@ def _detect_zoom_pct() -> int:
 
 ZOOM_PCT = _detect_zoom_pct()
 RESOLUTION_KEY = f"{RESOLUTION}-{ZOOM_PCT}"
-CRYSTAL    = bool(CONFIG.get("crystal", True))
-EQUIPMENT  = bool(CONFIG.get("equipment", True))
 
-# IMG_DIR: bonus.png (cristal/equipamento no fim do ciclo), dependente de idioma.
+# IMG_DIR: bonus.png ("I am the champion"), dependente de idioma.
 IMG_DIR = os.path.join("language", LANGUAGE, RESOLUTION, "in_game")
 
 # GLOBAL_DIR: fonte.png (início da próxima partida), independente de idioma.
@@ -290,26 +288,31 @@ def wait_for_match_start(poll: float = 2.0, timeout: Optional[float] = None) -> 
             return False
         time.sleep(poll)
 
-def esperar_e_clicar_bonus(vezes: int = 1) -> None:
-    restantes = vezes
-    poll_rapido = 0.3
+POLL_BONUS = 3.0
 
-    while restantes > 0:
-        pos = locate("bonus", "bonus.png", confidence=0.75)
-        if pos:
-            click_pos(pos, 0.2)
-            restantes -= 1
+def _bonus_watcher(wait_once: bool = False) -> None:
+    """
+    Fica clicando bonus.png ("I am the champion") sempre que aparecer -
+    mesmo mecanismo que era do in_game.py durante a partida, agora só aqui
+    (in_game.py morre via os._exit assim que count.png aparece, então quem
+    cuida do bonus dali pra frente é o fim_game.py).
 
-            # espera essa aparição sumir antes de procurar a próxima,
-            # evita clicar duas vezes na mesma e evita perder uma que
-            # aparece/some rápido em sequência
-            espera_sumir = time.time()
-            while locate("bonus", "bonus.png", confidence=0.75):
-                if time.time() - espera_sumir > 5:
-                    break
-                time.sleep(poll_rapido)
-        else:
-            time.sleep(poll_rapido)
+    wait_once=False (não é a última partida do ciclo): roda em thread solta,
+    infinito, só de olho enquanto espera a próxima partida começar.
+
+    wait_once=True (é a última partida do ciclo): chamada direta (bloqueia),
+    espera aparecer, clica uma vez e retorna - só então fecha o dota.
+    """
+    while True:
+        try:
+            pos = locate("bonus", "bonus.png", confidence=0.75)
+            if pos:
+                click_pos(pos, 0.5)
+                if wait_once:
+                    return
+        except Exception:
+            pass
+        time.sleep(POLL_BONUS)
 
 def disconnect_and_relaunch() -> None:
     """Fecha o dota e volta pro lobby (fim do ciclo, ou algo travou)."""
@@ -341,15 +344,19 @@ def processar_fim_partida() -> None:
     save_config_update(partidas_concluidas=PARTIDAS_CONCLUIDAS)
 
     if PARTIDAS_CONCLUIDAS >= REHOST_MAX:
-        vezes_bonus = int(CRYSTAL) + int(EQUIPMENT)
-        if vezes_bonus > 0:
-            esperar_e_clicar_bonus(vezes_bonus)
+        # Última partida do ciclo: espera o bonus aparecer e clica antes de
+        # fechar (bloqueia aqui, só segue depois de clicar).
+        _bonus_watcher(wait_once=True)
 
         CICLOS_FEITOS += 1
         save_status(0, REHOST_MAX, CICLOS_FEITOS)
         save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
         disconnect_and_relaunch()
         return
+
+    # Ainda não é a última partida do ciclo: fica de olho em bonus.png
+    # enquanto espera a próxima partida começar (ver _bonus_watcher).
+    threading.Thread(target=_bonus_watcher, daemon=True).start()
 
     # Espera a próxima partida começar (fonte.png). Se fonte não aparecer
     # em TIMEOUT_SEM_FONTE, mesmo fluxo dos outros timeouts: fecha dota,

@@ -67,7 +67,7 @@ RESOLUTION_KEY = f"{RESOLUTION}-{ZOOM_PCT}"
 NO_XP      = bool(CONFIG.get("no_xp", True))
 SUPORTE    = bool(CONFIG.get("support", True))
 
-# IMG_DIR: agora só guarda o que continua dependente de idioma (bonus, count).
+# IMG_DIR: agora só guarda o que continua dependente de idioma (count).
 IMG_DIR = os.path.join("language", LANGUAGE, RESOLUTION, "in_game")
 
 # GLOBAL_DIR: imagens independentes de idioma, só dependem da resolução.
@@ -90,7 +90,6 @@ except Exception:
     _RES_WIDTH = 1920
 CACHE_MARGIN      = max(60, round(60 * _RES_WIDTH / 1920))  # escala com a resolução (ver lobby.py)
 POLL_IN_GAME      = 2.0
-POLL_BONUS        = 3.0
 POLL_TESOURO      = 10.0
 POLL_STATUS       = 30.0
 TIMEOUT_SEM_COUNT = 4800
@@ -111,7 +110,7 @@ pyautogui.FAILSAFE = True
 # ==================================================
 # MOUSE LOCK
 # Todas as ações de mouse passam por aqui, serializadas, pra evitar que as
-# threads (bonus/tesouro/status) disputem o cursor ao mesmo tempo — era
+# threads (tesouro/status) disputem o cursor ao mesmo tempo — era
 # isso que impedia o mouse de ficar parado no "descanso".
 # ==================================================
 _mouse_lock = threading.RLock()
@@ -245,7 +244,7 @@ def _cache_invalidate(name: str) -> None:
 Region = tuple[int, int, int, int]
 
 def _img(*parts: str) -> str:
-    """Caminho dentro de IMG_DIR (dependente de idioma) — hoje só bonus/count."""
+    """Caminho dentro de IMG_DIR (dependente de idioma)."""
     return os.path.join(IMG_DIR, *parts)
 
 def _global_img(*parts: str) -> str:
@@ -670,16 +669,6 @@ def _launch_fim_game() -> None:
     elif os.path.exists("fim_game.py"):
         subprocess.Popen([sys.executable, "fim_game.py"], startupinfo=HIDDEN_WINDOW)
 
-def _bonus_watcher() -> None:
-    while True:
-        try:
-            pos = locate("bonus", "bonus.png", confidence=0.75)
-            if pos:
-                click_pos(pos, 0.5)
-        except Exception:
-            pass
-        time.sleep(POLL_BONUS)
-
 # ==================================================
 # EVENTO (global, independe de idioma/SUPORTE)
 # ==================================================
@@ -766,7 +755,6 @@ def iniciar_partida():
         subir_status()
         verificar_e_mover_itens()
 
-    threading.Thread(target=_bonus_watcher, daemon=True).start()
     threading.Thread(target=buscar_evento, daemon=True).start()
     if SUPORTE:
         threading.Thread(target=monitorar_tesouro, daemon=True).start()
