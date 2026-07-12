@@ -69,6 +69,32 @@ except Exception:
     _RES_WIDTH = 1920
 CACHE_MARGIN = max(60, round(60 * _RES_WIDTH / 1920))  # escala com a resolução (ver lobby.py)
 
+# ==================================================
+# VENDER (wings/equipamento) - coordenadas fixas capturadas via
+# coord_capture.py, uma por resolução (Dota não segue a escala do Windows).
+# ==================================================
+RANKS_ORDER = ["b", "a", "s", "ss", "sss", "ex"]
+
+VENDER_COORDS_FILE = os.path.join(COORDS_DIR, "coords_base_vender.json")
+
+def load_vender_coords() -> dict:
+    if not os.path.exists(VENDER_COORDS_FILE):
+        return {}
+    try:
+        with open(VENDER_COORDS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+VENDER_COORDS_ALL = load_vender_coords()
+VENDER_COORDS = VENDER_COORDS_ALL.get(RESOLUTION.lower()) or VENDER_COORDS_ALL.get(RESOLUTION) or {}
+WINGS_COORDS = VENDER_COORDS.get("wings", {})
+EQUIP_COORDS = VENDER_COORDS.get("equipamento", {})
+
+# {"b": bool, "a": bool, ...} - vem do painel "Vender" do start.py.
+SELL_WINGS = CONFIG.get("sell_wings", {})
+SELL_EQUIPMENT = CONFIG.get("sell_equipment", {})
+
 # Tempo (s) esperando fonte.png aparecer após count sumir (fim de partida
 # concluída, ainda não bateu rehost_max). Se estourar, mesmo fluxo dos
 # outros timeouts: fecha dota, chama lobby de novo.
@@ -297,6 +323,56 @@ def _bonus_watcher(wait_once: bool = False) -> None:
             pass
         time.sleep(POLL_BONUS)
 
+def _clicar_vender(coords: dict, chave: str, espera: float = 1.0) -> None:
+    pos = coords.get(chave)
+    if not pos:
+        return
+    click_pos(tuple(pos), delay_after=espera, rest=False)
+
+def vender_wings() -> None:
+    """
+    Pra cada rank marcado em Wings (ordem b/a/s/ss/sss/ex): abre a loja,
+    compra, confirma e fecha. Reabre a loja do zero a cada rank - só o
+    primeiro open espera 10s (carregando), os de volta são 1s (loja "quente").
+    """
+    ranks = [r for r in RANKS_ORDER if SELL_WINGS.get(r)]
+    if not ranks or not WINGS_COORDS:
+        return
+    c = WINGS_COORDS
+    for i, rank in enumerate(ranks):
+        _clicar_vender(c, "wing_shop", 10.0 if i == 0 else 1.0)
+        _clicar_vender(c, "wings")
+        _clicar_vender(c, "buy")
+        _clicar_vender(c, f"wing_{rank}")
+        _clicar_vender(c, "buy_2", 5.0)
+        _clicar_vender(c, "confirm")
+        _clicar_vender(c, "ok")
+        _clicar_vender(c, "closer")
+
+def vender_equipamento() -> None:
+    """Mesma lógica do vender_wings, fluxo de Equipamento (forja/upgrade)."""
+    ranks = [r for r in RANKS_ORDER if SELL_EQUIPMENT.get(r)]
+    if not ranks or not EQUIP_COORDS:
+        return
+    c = EQUIP_COORDS
+    for i, rank in enumerate(ranks):
+        _clicar_vender(c, "equip_forge", 10.0 if i == 0 else 1.0)
+        _clicar_vender(c, "upgrade")
+        _clicar_vender(c, f"equip_{rank}")
+        _clicar_vender(c, "confirm", 5.0)
+        _clicar_vender(c, "closer")
+
+def aguardar_count_reaparecer(timeout: float = 60) -> bool:
+    """Sincroniza a troca entre wings->equipamento: espera a tela voltar
+    pro normal (count.png visível de novo) antes de abrir o próximo fluxo."""
+    started = time.time()
+    while True:
+        if locate("count", "count.png", confidence=0.70):
+            return True
+        if time.time() - started > timeout:
+            return False
+        time.sleep(0.5)
+
 def disconnect_and_relaunch() -> None:
     """Fecha o dota e volta pro lobby (fim do ciclo, ou algo travou)."""
     try:
@@ -338,8 +414,25 @@ def processar_fim_partida() -> None:
         return
 
     # Ainda não é a última partida do ciclo: fica de olho em bonus.png
-    # enquanto espera a próxima partida começar (ver _bonus_watcher).
+    # enquanto espera a próxima partida começar (ver _bonus_watcher). Bonus
+    # tem prioridade sobre tudo - roda solto em paralelo com a venda abaixo.
     threading.Thread(target=_bonus_watcher, daemon=True).start()
+
+    # Venda: wings primeiro, depois equipamento - só entra na lista quem
+    # tem pelo menos um rank marcado no painel "Vender" do start.py. Entre
+    # um fluxo e outro espera count.png reaparecer (tela normalizou) antes
+    # de abrir o próximo; se só um (ou nenhum) tá marcado não precisa
+    # esperar nada extra.
+    fluxos_venda = []
+    if any(SELL_WINGS.get(r) for r in RANKS_ORDER):
+        fluxos_venda.append(vender_wings)
+    if any(SELL_EQUIPMENT.get(r) for r in RANKS_ORDER):
+        fluxos_venda.append(vender_equipamento)
+
+    for i, fluxo in enumerate(fluxos_venda):
+        fluxo()
+        if i < len(fluxos_venda) - 1:
+            aguardar_count_reaparecer()
 
     # Espera a próxima partida começar (fonte.png). Se fonte não aparecer
     # em TIMEOUT_SEM_FONTE, mesmo fluxo dos outros timeouts: fecha dota,
