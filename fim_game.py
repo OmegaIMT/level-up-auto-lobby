@@ -253,10 +253,12 @@ def locate(cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir:
     return pos
 
 def descansar_mouse() -> None:
+    """Canto da tela, não o centro: os popups de fim de ciclo (fonte,
+    cristal/equipamento) aparecem centralizados, e o cursor parado em cima
+    deles atrapalhava o locateOnScreen da próxima detecção."""
     try:
-        w, h = pyautogui.size()
         with _mouse_lock:
-            pyautogui.moveTo(w // 2, h // 2)
+            pyautogui.moveTo(20, 20)
     except Exception:
         pass
 

@@ -88,19 +88,25 @@ LANGUAGES_REVERSE = {v: k for k, v in LANGUAGES.items()}
 TEXT = {}
 
 # Painel "Vender": rank do item (ícone, não texto) -> vende equipamento/wings
-# desse rank quando aparecer. Nomes das variáveis = nome do rank.
-RANKS = ["a", "b", "s", "ss", "sss", "ex"]
+# desse rank quando aparecer. Nomes das variáveis = nome do rank. Ordem de
+# pior pra melhor rank: B, A, S, SS, SSS, EX.
+RANKS = ["b", "a", "s", "ss", "sss", "ex"]
 BUTTON_IMG_DIR = os.path.join("language", "global", "1920x1080", "buttons")
 _rank_icons: dict[str, ImageTk.PhotoImage] = {}
 
-def load_rank_icons(size: int = 28) -> None:
+def load_rank_icons(canvas_size: int = 44) -> None:
+    """Cola o ícone no tamanho nativo (sem redimensionar) num canvas
+    transparente fixo - fica nítido em vez de borrado pelo resize pra baixo."""
     for rank in RANKS:
         path = os.path.join(BUTTON_IMG_DIR, f"{rank}.png")
         if not os.path.exists(path):
             continue
         img = Image.open(path).convert("RGBA")
-        img.thumbnail((size, size), Image.LANCZOS)
-        _rank_icons[rank] = ImageTk.PhotoImage(img)
+        if img.width > canvas_size or img.height > canvas_size:
+            img.thumbnail((canvas_size, canvas_size), Image.LANCZOS)
+        canvas = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+        canvas.paste(img, ((canvas_size - img.width) // 2, (canvas_size - img.height) // 2), img)
+        _rank_icons[rank] = ImageTk.PhotoImage(canvas)
 
 SELECTED_BG = "#4a90d9"  # cor única de destaque pra todo rank marcado (padronizado)
 
@@ -387,7 +393,7 @@ if __name__ == "__main__":
     _cleanup_old_update_files()
 
     root = tk.Tk()
-    root.geometry("590x320")
+    root.geometry("700x320")
     root.resizable(False, False)
 
     if os.path.exists("level-up.ico"):
