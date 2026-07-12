@@ -5,7 +5,6 @@ import json
 import threading
 import subprocess
 import pyautogui
-import keyboard
 from typing import Optional, List
 
 if sys.platform == "win32":
@@ -65,7 +64,11 @@ REHOST_MAX          = int(CONFIG.get("rehost_max", 5))
 CICLOS_FEITOS       = int(CONFIG.get("ciclos", 0))
 PARTIDAS_CONCLUIDAS = int(CONFIG.get("partidas_concluidas", 0))
 
-CACHE_FILE        = f"cache_in_game_{RESOLUTION}.txt"
+# coords/: mesmo esquema do lobby.py — um arquivo de cache por resolução,
+# versionado (mesma resolução = mesma posição sempre).
+COORDS_DIR = "coords"
+os.makedirs(COORDS_DIR, exist_ok=True)
+CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION}_in_game.txt")
 try:
     _RES_WIDTH = int(RESOLUTION.lower().split("x")[0])
 except Exception:
@@ -146,8 +149,45 @@ def _update_debug(name: str, found: bool) -> None:
     except Exception:
         pass
 
+def _matar_irmaos() -> None:
+    """
+    Esc em qualquer um dos três (lobby/in_game/painel) derruba os três.
+    Pula o próprio .exe na lista: taskkill mata a própria imagem na hora
+    (processo some no meio do for), o que abortaria antes de matar os
+    outros - o próprio processo já se encerra sozinho com os._exit depois.
+    """
+    if sys.platform != "win32":
+        return
+    exe_proprio = os.path.basename(sys.executable).lower() if getattr(sys, "frozen", False) else None
+    for target in ("lobby.exe", "in_game.exe", "painel.exe", "start.exe"):
+        if target.lower() == exe_proprio:
+            continue
+        try:
+            subprocess.run(["taskkill", "/F", "/IM", target],
+                            startupinfo=HIDDEN_WINDOW, capture_output=True)
+        except Exception:
+            pass
+    ps_script = (
+        "Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='pythonw.exe'\" | "
+        "Where-Object { $_.CommandLine -match 'lobby\\.py|in_game\\.py|painel\\.py|start\\.py' } | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    )
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+                        startupinfo=HIDDEN_WINDOW, capture_output=True)
+    except Exception:
+        pass
+
 def _watch_esc() -> None:
-    keyboard.wait("esc")
+    """
+    GetAsyncKeyState em vez de 'keyboard': hotkey por nome depende do
+    layout de teclado ativo e falha em layouts não-US (ex: russo);
+    VK_ESCAPE é fixo independente de layout.
+    """
+    VK_ESCAPE = 0x1B
+    while not (user32.GetAsyncKeyState(VK_ESCAPE) & 0x8000):
+        time.sleep(0.05)
+    _matar_irmaos()
     os._exit(1)
 
 _coord_cache: dict[str, tuple[int, int]] = {}
@@ -266,7 +306,7 @@ def click_centro_tela() -> None:
 # ==================================================
 # COORDENADAS FIXAS + ESCALA DE RESOLUÇÃO
 # ==================================================
-COORDS_FILE = "coords_base.json"
+COORDS_FILE = os.path.join(COORDS_DIR, "coords_base.json")
 
 def load_coords_base() -> dict:
     if not os.path.exists(COORDS_FILE):

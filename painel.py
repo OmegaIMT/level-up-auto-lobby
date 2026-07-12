@@ -1,9 +1,18 @@
+import ctypes
 import os
+import subprocess
 import sys
 import json
 import threading
+import time
 import tkinter as tk
-import keyboard
+
+VK_ESCAPE = 0x1B
+_user32 = ctypes.WinDLL("user32") if sys.platform == "win32" else None
+
+HIDDEN_WINDOW = subprocess.STARTUPINFO()
+HIDDEN_WINDOW.dwFlags     |= subprocess.STARTF_USESHOWWINDOW
+HIDDEN_WINDOW.wShowWindow  = 0
 
 
 CONFIG_FILE  = "config.json"   # gerado pelo start.py — usado só para ler o idioma
@@ -68,9 +77,50 @@ def ensure_status_file() -> None:
         pass
 
 
+def _matar_irmaos() -> None:
+    """
+    Esc em qualquer um dos três (lobby/in_game/painel) derruba os três.
+    Pula o próprio .exe na lista: taskkill mata a própria imagem na hora
+    (processo some no meio do for), o que abortaria antes de matar os
+    outros - o próprio processo já se encerra sozinho com os._exit depois.
+    """
+    if sys.platform != "win32":
+        return
+    exe_proprio = os.path.basename(sys.executable).lower() if getattr(sys, "frozen", False) else None
+    for target in ("lobby.exe", "in_game.exe", "painel.exe", "start.exe"):
+        if target.lower() == exe_proprio:
+            continue
+        try:
+            subprocess.run(["taskkill", "/F", "/IM", target],
+                            startupinfo=HIDDEN_WINDOW, capture_output=True)
+        except Exception:
+            pass
+    ps_script = (
+        "Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='pythonw.exe'\" | "
+        "Where-Object { $_.CommandLine -match 'lobby\\.py|in_game\\.py|painel\\.py|start\\.py' } | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    )
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+                        startupinfo=HIDDEN_WINDOW, capture_output=True)
+    except Exception:
+        pass
+
+
 def _watch_esc() -> None:
-    keyboard.add_hotkey("esc", lambda: os._exit(0), suppress=False)
-    threading.Event().wait()
+    """
+    Poll de VK_ESCAPE via GetAsyncKeyState em vez de biblioteca 'keyboard':
+    hotkeys por nome dela dependem do layout de teclado ativo e falham em
+    layouts não-US (ex: russo/ЙЦУКЕН) - VK code é sempre o mesmo, layout
+    não importa.
+    """
+    if _user32 is None:
+        return
+    while True:
+        if _user32.GetAsyncKeyState(VK_ESCAPE) & 0x8000:
+            _matar_irmaos()
+            os._exit(0)
+        time.sleep(0.05)
 
 
 def read_status() -> dict | None:

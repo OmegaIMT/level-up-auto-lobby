@@ -188,9 +188,28 @@ def kill_all_children() -> None:
 
     if sys.platform == "win32":
         for target in ["lobby.exe", "in_game.exe", "painel.exe"]:
-            os.system(f'taskkill /f /im {target} >nul 2>&1')
-        for script in ["lobby.py", "in_game.py", "painel.py"]:
-            os.system(f'wmic process where "commandline like \'%{script}%\'" delete >nul 2>&1')
+            try:
+                subprocess.run(["taskkill", "/F", "/IM", target],
+                                startupinfo=HIDDEN_WINDOW, capture_output=True)
+            except Exception:
+                pass
+
+        # wmic foi removido do Windows 11 (24H2+) — kill por commandline
+        # (pega lobby.py/in_game.py/painel.py rodando soltos, ex: respawn
+        # feito pelo próprio in_game.py fora do controle deste processo)
+        # agora via Get-CimInstance, sucessor suportado.
+        ps_script = (
+            "Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='pythonw.exe'\" | "
+            "Where-Object { $_.CommandLine -match 'lobby\\.py|in_game\\.py|painel\\.py' } | "
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+        )
+        try:
+            subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+                startupinfo=HIDDEN_WINDOW, capture_output=True,
+            )
+        except Exception:
+            pass
 
 def on_close() -> None:
     kill_all_children()

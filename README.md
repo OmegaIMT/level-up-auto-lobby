@@ -30,7 +30,7 @@ language/global/<resolução>/error/      # telas de erro/desconexão
 
 Idiomas disponíveis: `pt-br`, `en-us`, `ru`, `zh-cn`. Resoluções calibradas: `1920x1080` e `1600x900`.
 
-Coordenadas de clique fixo (mochila, status, gold) ficam em `coords_base.json` e são escaladas em runtime pra resolução configurada.
+Coordenadas de clique fixo (mochila, status, gold) ficam em `coords/coords_base.json` e são escaladas em runtime pra resolução configurada. A pasta `coords/` também guarda o cache de posição das imagens (um arquivo por resolução, versionado — mesma resolução sempre acha a imagem no mesmo lugar).
 
 ## Pré-requisitos
 
@@ -40,10 +40,10 @@ Coordenadas de clique fixo (mochila, status, gold) ficam em `coords_base.json` e
 ## Instalação
 
 ```bash
-setup.bat
+utilidades\setup.bat
 ```
 
-Isso atualiza o `pip` e instala tudo do `requirements.txt` (`pyautogui`, `keyboard`, `opencv-python` — este último é exigido pelo `pyautogui` para o parâmetro `confidence` de matching por template).
+Isso atualiza o `pip` e instala tudo do `utilidades/requirements.txt` (`pyautogui`, `opencv-python` — este último é exigido pelo `pyautogui` para o parâmetro `confidence` de matching por template).
 
 ## Como rodar
 
@@ -61,7 +61,7 @@ Na janela: informa a senha da lobby, quantidade de re-hosts, idioma, resolução
 python build.py
 ```
 
-Roda o PyInstaller com `build.spec` (só `start.exe`) e copia `lobby.py`, `in_game.py`, `painel.py`, `updater.py`, `coords_base.json`, `requirements.txt`, `version.txt`, `level-up.ico` e `language/` pra raiz de `dist/Dota-level-up-lobby/`.
+Roda o PyInstaller com `build.spec` (só `start.exe`) e copia `lobby.py`, `in_game.py`, `painel.py`, `updater.py`, `coords/`, `version.json`, `level-up.ico` e `language/` pra raiz de `dist/Dota-level-up-lobby/` (`requirements.txt` é só de dev — as dependências já vão embutidas no `.exe` pelo PyInstaller).
 
 ## Instalador (Setup.exe)
 
@@ -78,7 +78,7 @@ Gera `installer_output/Dota-Level-Up-Lobby-Setup-<versão>.exe`. O instalador de
 
 O `updater.py` compara o `version.txt` local com o `version.txt` da branch `main` no GitHub (via `raw.githubusercontent.com`). Pra publicar uma atualização:
 
-1. Mexer no que precisar (`lobby.py`, `in_game.py`, `painel.py`, imagens em `language/`, `coords_base.json`, etc).
+1. Mexer no que precisar (`lobby.py`, `in_game.py`, `painel.py`, imagens em `language/`, `coords/coords_base.json`, etc).
 2. Subir a versão em `version.txt` (ex: `2.2.0` -> `2.2.1`).
 3. `git push` pra `main`.
 

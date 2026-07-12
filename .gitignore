@@ -5,10 +5,6 @@ build
 installer_output/
 __pycache__/
 *.pyc
-cache_in_game_*.txt
-cache_lobby_*.txt
-cache_in_game.json
-cache_lobby.json
 panel_status.txt
 auto_lobby.exe
 teste.py

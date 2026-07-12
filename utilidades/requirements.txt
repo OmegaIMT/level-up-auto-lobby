@@ -1,4 +1,3 @@
 PyAutoGUI
-keyboard
 opencv-python
 pyinstaller

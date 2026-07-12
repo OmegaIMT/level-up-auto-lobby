@@ -28,8 +28,9 @@ INSTALLER_SCRIPT = "installer.iss"
 
 # Dados que o exe lê em runtime e o PyInstaller não empacota sozinho
 # (não são import, então não entram na Analysis automaticamente).
+# coords/ (coords_base.json + cache de posição por resolução) vai à parte,
+# copiada como pasta inteira — ver copy_to_root().
 DATA_FILES = [
-    "coords_base.json",
     "version.json",
 ]
 
@@ -68,7 +69,16 @@ def copy_to_root() -> None:
         shutil.copytree(lang_src, lang_dst)
         print(f"[OK] {lang_dst}")
 
-    # 3. Arquivos de dados (coords_base.json, version.json)
+    # 3. Pasta coords/ (coords_base.json + cache de posição por resolução)
+    coords_src = "coords"
+    coords_dst = os.path.join(DIST_ROOT, "coords")
+    if os.path.exists(coords_src):
+        if os.path.exists(coords_dst):
+            shutil.rmtree(coords_dst)
+        shutil.copytree(coords_src, coords_dst)
+        print(f"[OK] {coords_dst}")
+
+    # 4. Arquivos de dados soltos (version.json)
     for fname in DATA_FILES:
         if os.path.exists(fname):
             shutil.copy2(fname, os.path.join(DIST_ROOT, fname))
