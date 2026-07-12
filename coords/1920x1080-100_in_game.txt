@@ -1,0 +1,2 @@
+fonte=1123,63
+shop_global=1234,1014

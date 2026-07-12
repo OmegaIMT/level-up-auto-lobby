@@ -7,6 +7,7 @@ import queue
 import threading
 import tkinter as tk
 from tkinter import ttk
+from PIL import Image, ImageTk
 
 import updater
 
@@ -86,6 +87,44 @@ RESOLUTIONS = {
 LANGUAGES_REVERSE = {v: k for k, v in LANGUAGES.items()}
 TEXT = {}
 
+# Painel "Vender": rank do item (ícone, não texto) -> vende equipamento/wings
+# desse rank quando aparecer. Nomes das variáveis = nome do rank.
+RANKS = ["a", "b", "s", "ss", "sss", "ex"]
+BUTTON_IMG_DIR = os.path.join("language", "global", "1920x1080", "buttons")
+_rank_icons: dict[str, ImageTk.PhotoImage] = {}
+
+def load_rank_icons(size: int = 28) -> None:
+    for rank in RANKS:
+        path = os.path.join(BUTTON_IMG_DIR, f"{rank}.png")
+        if not os.path.exists(path):
+            continue
+        img = Image.open(path).convert("RGBA")
+        img.thumbnail((size, size), Image.LANCZOS)
+        _rank_icons[rank] = ImageTk.PhotoImage(img)
+
+SELECTED_BG = "#4a90d9"  # cor única de destaque pra todo rank marcado (padronizado)
+
+def build_rank_row(parent: ttk.Frame) -> dict[str, tk.BooleanVar]:
+    """tk.Checkbutton nativo aqui saía com um círculo preto feio (chrome do
+    tema do Windows em cima do botão) - Label + clique próprio não sofre
+    esse chrome, só o ícone, com um destaque uniforme quando marcado."""
+    row = ttk.Frame(parent)
+    row.pack(pady=(2, 8))
+    idle_bg = row.winfo_toplevel().cget("bg")
+    variables: dict[str, tk.BooleanVar] = {}
+    for rank in RANKS:
+        var = tk.BooleanVar()
+        variables[rank] = var
+        lbl = tk.Label(row, image=_rank_icons.get(rank), bg=idle_bg, bd=0, padx=3, pady=2)
+        lbl.pack(side="left", padx=2)
+
+        def _on_change(*_args, v=var, w=lbl):
+            w.config(bg=SELECTED_BG if v.get() else idle_bg)
+
+        var.trace_add("write", _on_change)
+        lbl.bind("<Button-1>", lambda _event, v=var: v.set(not v.get()))
+    return variables
+
 def load_language(language_folder: str) -> None:
     global TEXT
     path = os.path.join("language", language_folder, "start.json")
@@ -133,6 +172,14 @@ def apply_saved_config(saved: dict) -> None:
     no_xp_var.set(bool(saved.get("no_xp", False)))
     support_var.set(bool(saved.get("support", False)))
 
+    saved_sell_equipment = saved.get("sell_equipment", {})
+    for rank, var in sell_equipment_vars.items():
+        var.set(bool(saved_sell_equipment.get(rank, False)))
+
+    saved_sell_wings = saved.get("sell_wings", {})
+    for rank, var in sell_wings_vars.items():
+        var.set(bool(saved_sell_wings.get(rank, False)))
+
     atualizar_interface_idioma()
 
 def atualizar_interface_idioma(event=None) -> None:
@@ -150,6 +197,9 @@ def atualizar_interface_idioma(event=None) -> None:
     chk_equipment.config(text=TEXT.get("equipment", "Equipamentos"))
     chk_no_xp.config(text=TEXT.get("no_xp", "Desativar XP"))
     chk_support.config(text=TEXT.get("support", "Suporte"))
+    vender_frame.config(text=TEXT.get("sell", "Vender"))
+    lbl_sell_equipment.config(text=TEXT.get("sell_equipment", "Equipamento"))
+    lbl_sell_wings.config(text=TEXT.get("sell_wings", "Wings"))
     btn_start.config(text=TEXT.get("start", "Start"))
     label_footer.config(text=TEXT.get("footer", ""))
 
@@ -187,7 +237,7 @@ def kill_all_children() -> None:
             except Exception: pass
 
     if sys.platform == "win32":
-        for target in ["lobby.exe", "in_game.exe", "painel.exe"]:
+        for target in ["lobby.exe", "in_game.exe", "fim_game.exe", "painel.exe"]:
             try:
                 subprocess.run(["taskkill", "/F", "/IM", target],
                                 startupinfo=HIDDEN_WINDOW, capture_output=True)
@@ -195,12 +245,12 @@ def kill_all_children() -> None:
                 pass
 
         # wmic foi removido do Windows 11 (24H2+) — kill por commandline
-        # (pega lobby.py/in_game.py/painel.py rodando soltos, ex: respawn
-        # feito pelo próprio in_game.py fora do controle deste processo)
-        # agora via Get-CimInstance, sucessor suportado.
+        # (pega lobby.py/in_game.py/fim_game.py/painel.py rodando soltos,
+        # ex: respawn feito pelo próprio in_game.py fora do controle deste
+        # processo) agora via Get-CimInstance, sucessor suportado.
         ps_script = (
             "Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='pythonw.exe'\" | "
-            "Where-Object { $_.CommandLine -match 'lobby\\.py|in_game\\.py|painel\\.py' } | "
+            "Where-Object { $_.CommandLine -match 'lobby\\.py|in_game\\.py|fim_game\\.py|painel\\.py' } | "
             "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
         )
         try:
@@ -243,6 +293,8 @@ def start() -> None:
         "equipment": equipment_var.get(),
         "no_xp": no_xp_var.get(),
         "support": support_var.get(),
+        "sell_equipment": {rank: var.get() for rank, var in sell_equipment_vars.items()},
+        "sell_wings": {rank: var.get() for rank, var in sell_wings_vars.items()},
     }
 
     save_config(config)
@@ -335,7 +387,7 @@ if __name__ == "__main__":
     _cleanup_old_update_files()
 
     root = tk.Tk()
-    root.geometry("350x320")
+    root.geometry("590x320")
     root.resizable(False, False)
 
     if os.path.exists("level-up.ico"):
@@ -343,8 +395,13 @@ if __name__ == "__main__":
         except Exception: pass
 
     root.protocol("WM_DELETE_WINDOW", on_close)
-    frame = ttk.Frame(root, padding=15)
-    frame.pack(fill="both", expand=True)
+    load_rank_icons()
+
+    content = ttk.Frame(root, padding=15)
+    content.pack(fill="both", expand=True)
+
+    frame = ttk.Frame(content)
+    frame.pack(side="left", fill="both", expand=True)
 
     # Campo de Senha
     row_passwords = ttk.Frame(frame)
@@ -400,6 +457,18 @@ if __name__ == "__main__":
     support_var = tk.BooleanVar()
     chk_support = ttk.Checkbutton(checkbox_row_2, variable=support_var)
     chk_support.pack(side="left")
+
+    # Painel "Vender": rank (ícone) de equipamento/wings a vender quando aparecer
+    vender_frame = ttk.LabelFrame(content, labelanchor="n")
+    vender_frame.pack(side="left", fill="y", padx=(15, 0))
+
+    lbl_sell_equipment = ttk.Label(vender_frame, anchor="center")
+    lbl_sell_equipment.pack(fill="x", pady=(10, 0), padx=10)
+    sell_equipment_vars = build_rank_row(vender_frame)
+
+    lbl_sell_wings = ttk.Label(vender_frame, anchor="center")
+    lbl_sell_wings.pack(fill="x", pady=(4, 0), padx=10)
+    sell_wings_vars = build_rank_row(vender_frame)
 
     # Botões e Status
     btn_start = ttk.Button(frame, command=start)

@@ -47,9 +47,24 @@ def save_config_update(**kwargs) -> None:
 
 LANGUAGE   = CONFIG.get("language", "pt-br")
 RESOLUTION = CONFIG.get("resolution", "1920x1080")
+
+
+def _detect_zoom_pct() -> int:
+    """Escala de exibição do Windows (100/125/150...), ver lobby.py."""
+    if sys.platform != "win32":
+        return 100
+    try:
+        return int(ctypes.windll.shcore.GetScaleFactorForDevice(0))
+    except Exception:
+        try:
+            return round(user32.GetDpiForSystem() / 96 * 100)
+        except Exception:
+            return 100
+
+
+ZOOM_PCT = _detect_zoom_pct()
+RESOLUTION_KEY = f"{RESOLUTION}-{ZOOM_PCT}"
 NO_XP      = bool(CONFIG.get("no_xp", True))
-CRYSTAL    = bool(CONFIG.get("crystal", True))
-EQUIPMENT  = bool(CONFIG.get("equipment", True))
 SUPORTE    = bool(CONFIG.get("support", True))
 
 # IMG_DIR: agora só guarda o que continua dependente de idioma (bonus, count).
@@ -68,7 +83,7 @@ PARTIDAS_CONCLUIDAS = int(CONFIG.get("partidas_concluidas", 0))
 # versionado (mesma resolução = mesma posição sempre).
 COORDS_DIR = "coords"
 os.makedirs(COORDS_DIR, exist_ok=True)
-CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION}_in_game.txt")
+CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION_KEY}_in_game.txt")
 try:
     _RES_WIDTH = int(RESOLUTION.lower().split("x")[0])
 except Exception:
@@ -79,11 +94,6 @@ POLL_BONUS        = 3.0
 POLL_TESOURO      = 10.0
 POLL_STATUS       = 30.0
 TIMEOUT_SEM_COUNT = 4800
-
-# Tempo (s) esperando fonte.png aparecer após count sumir (fim de partida
-# concluída). Se estourar, mesmo fluxo dos outros timeouts: fecha dota,
-# chama lobby de novo.
-TIMEOUT_SEM_FONTE = 1800
 
 # Tempo (s) sem ver count.png a partir do qual passamos a checar as imagens
 # de erro na pasta global "error".
@@ -159,7 +169,7 @@ def _matar_irmaos() -> None:
     if sys.platform != "win32":
         return
     exe_proprio = os.path.basename(sys.executable).lower() if getattr(sys, "frozen", False) else None
-    for target in ("lobby.exe", "in_game.exe", "painel.exe", "start.exe"):
+    for target in ("lobby.exe", "in_game.exe", "fim_game.exe", "painel.exe"):
         if target.lower() == exe_proprio:
             continue
         try:
@@ -169,7 +179,7 @@ def _matar_irmaos() -> None:
             pass
     ps_script = (
         "Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='pythonw.exe'\" | "
-        "Where-Object { $_.CommandLine -match 'lobby\\.py|in_game\\.py|painel\\.py|start\\.py' } | "
+        "Where-Object { $_.CommandLine -match 'lobby\\.py|in_game\\.py|fim_game\\.py|painel\\.py' } | "
         "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
     )
     try:
@@ -306,7 +316,10 @@ def click_centro_tela() -> None:
 # ==================================================
 # COORDENADAS FIXAS + ESCALA DE RESOLUÇÃO
 # ==================================================
-COORDS_FILE = os.path.join(COORDS_DIR, "coords_base.json")
+# coords_base_in_game.json: coordenadas fixas usadas só pelo in_game.py
+# (mochila, status, gold...). fim_game.py tem seu próprio arquivo
+# (coords_base_fim_game.json) - cada processo com seu conjunto.
+COORDS_FILE = os.path.join(COORDS_DIR, "coords_base_in_game.json")
 
 def load_coords_base() -> dict:
     if not os.path.exists(COORDS_FILE):
@@ -321,11 +334,18 @@ COORDS_ALL = load_coords_base()
 
 BASE_RES = "1920x1080"
 BASE_WIDTH, BASE_HEIGHT = (int(v) for v in BASE_RES.split("x"))
-BASE_COORDS = COORDS_ALL.get(BASE_RES, {})
+BASE_COORDS = COORDS_ALL.get(f"{BASE_RES}-100", {}) or COORDS_ALL.get(BASE_RES, {})
 
-# Bloco com coordenadas reais da resolução atual (ex: "3440x1440"), se existir
-# em coords_base.json. Quando existe, usamos direto - sem fórmula, sem chute.
-RES_COORDS = COORDS_ALL.get(RESOLUTION.lower()) or COORDS_ALL.get(RESOLUTION) or {}
+# Bloco com coordenadas reais da resolução+zoom atual (ex: "3440x1440-100"),
+# se existir em coords_base_in_game.json. Quando existe, usamos direto - sem
+# fórmula, sem chute. Cai pro bloco só-resolução (sem zoom) por compat.
+RES_COORDS = (
+    COORDS_ALL.get(RESOLUTION_KEY)
+    or COORDS_ALL.get(RESOLUTION_KEY.lower())
+    or COORDS_ALL.get(RESOLUTION.lower())
+    or COORDS_ALL.get(RESOLUTION)
+    or {}
+)
 
 def _scale_from_base(coord_base: tuple[int, int]) -> tuple[int, int]:
     """
@@ -615,27 +635,6 @@ def monitorar_tesouro() -> None:
 
         _stop_extras.wait(POLL_TESOURO)
 
-def esperar_e_clicar_bonus(vezes: int = 1) -> None:
-    restantes = vezes
-    poll_rapido = 0.3
-
-    while restantes > 0:
-        pos = locate("bonus", "bonus.png", confidence=0.75)
-        if pos:
-            click_pos(pos, 0.2)
-            restantes -= 1
-
-            # espera essa aparição sumir antes de procurar a próxima,
-            # evita clicar duas vezes na mesma e evita perder uma que
-            # aparece/some rápido em sequência
-            espera_sumir = time.time()
-            while locate("bonus", "bonus.png", confidence=0.75):
-                if time.time() - espera_sumir > 5:
-                    break
-                time.sleep(poll_rapido)
-        else:
-            time.sleep(poll_rapido)
-
 def disable_xp() -> None:
     if not NO_XP or XP_BUTTON_BASE is None:
         return
@@ -664,6 +663,12 @@ def disconnect_and_relaunch() -> None:
     else:
         subprocess.Popen([sys.executable, "lobby.py", CONFIG_FILE], startupinfo=HIDDEN_WINDOW)
     os._exit(0)
+
+def _launch_fim_game() -> None:
+    if os.path.exists("fim_game.exe"):
+        subprocess.Popen(["fim_game.exe"], startupinfo=HIDDEN_WINDOW)
+    elif os.path.exists("fim_game.py"):
+        subprocess.Popen([sys.executable, "fim_game.py"], startupinfo=HIDDEN_WINDOW)
 
 def _bonus_watcher() -> None:
     while True:
@@ -713,75 +718,46 @@ def verificar_erro() -> Optional[str]:
     return None
 
 def monitor_match() -> None:
-    global PARTIDAS_CONCLUIDAS, CICLOS_FEITOS
+    global CICLOS_FEITOS
 
-    count_ever_seen = False
     last_seen_time = time.time()
     erro_verificado = False
 
     while True:
         pos_count = locate("count", "count.png", confidence=0.70)
 
-        if pos_count and not count_ever_seen:
-            count_ever_seen = True
+        if pos_count:
+            # Fim da partida: a partir daqui quem assume é o fim_game.py
+            # (conta a partida, cristal/equipamento, ciclos, decide fechar
+            # o dota + voltar pro lobby ou puxar o in_game de novo).
             _stop_extras.set()
+            _launch_fim_game()
+            os._exit(0)
 
-            PARTIDAS_CONCLUIDAS += 1
-            save_status(PARTIDAS_CONCLUIDAS, REHOST_MAX, CICLOS_FEITOS)
-            save_config_update(partidas_concluidas=PARTIDAS_CONCLUIDAS)
+        elapsed = time.time() - last_seen_time
 
-            if PARTIDAS_CONCLUIDAS >= REHOST_MAX:
-                vezes_bonus = int(CRYSTAL) + int(EQUIPMENT)
-                if vezes_bonus > 0:
-                    esperar_e_clicar_bonus(vezes_bonus)
-
+        # Checagem de erro: só uma vez por ciclo de espera, depois de ERROR_CHECK_SECONDS.
+        if not erro_verificado and elapsed > ERROR_CHECK_SECONDS:
+            erro_verificado = True
+            nome_erro = verificar_erro()
+            if nome_erro:
+                # Mesmo comportamento de quando atinge o max de partidas:
+                # fecha o dota, chama o lobby e salva mais um ciclo.
                 CICLOS_FEITOS += 1
                 save_status(0, REHOST_MAX, CICLOS_FEITOS)
                 save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
                 disconnect_and_relaunch()
                 return
 
-            # Espera a próxima partida começar (fonte.png). Se fonte não
-            # aparecer em TIMEOUT_SEM_FONTE, mesmo fluxo dos outros
-            # timeouts: fecha dota, chama lobby de novo.
-            if not wait_for_match_start(timeout=TIMEOUT_SEM_FONTE):
-                CICLOS_FEITOS += 1
-                save_status(0, REHOST_MAX, CICLOS_FEITOS)
-                save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
-                disconnect_and_relaunch()
-                return
-
-            iniciar_partida()
-
-            count_ever_seen = False
-            last_seen_time = time.time()
-            erro_verificado = False
-
-        elif not count_ever_seen:
-            elapsed = time.time() - last_seen_time
-
-            # Checagem de erro: só uma vez por ciclo de espera, depois de ERROR_CHECK_SECONDS.
-            if not erro_verificado and elapsed > ERROR_CHECK_SECONDS:
-                erro_verificado = True
-                nome_erro = verificar_erro()
-                if nome_erro:
-                    # Mesmo comportamento de quando atinge o max de partidas:
-                    # fecha o dota, chama o lobby e salva mais um ciclo.
-                    CICLOS_FEITOS += 1
-                    save_status(0, REHOST_MAX, CICLOS_FEITOS)
-                    save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
-                    disconnect_and_relaunch()
-                    return
-
-            if elapsed > TIMEOUT_SEM_COUNT:
-                save_status(0, REHOST_MAX, CICLOS_FEITOS)
-                save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
-                disconnect_and_relaunch()
-                return
+        if elapsed > TIMEOUT_SEM_COUNT:
+            save_status(0, REHOST_MAX, CICLOS_FEITOS)
+            save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
+            disconnect_and_relaunch()
+            return
 
         time.sleep(POLL_IN_GAME)
 
-def iniciar_partida(criar_threads=True):
+def iniciar_partida():
     _stop_extras.clear()
 
     disable_xp()
@@ -790,12 +766,11 @@ def iniciar_partida(criar_threads=True):
         subir_status()
         verificar_e_mover_itens()
 
-    if criar_threads:
-        threading.Thread(target=_bonus_watcher, daemon=True).start()
-        threading.Thread(target=buscar_evento, daemon=True).start()
-        if SUPORTE:
-            threading.Thread(target=monitorar_tesouro, daemon=True).start()
-            threading.Thread(target=monitorar_status, daemon=True).start()
+    threading.Thread(target=_bonus_watcher, daemon=True).start()
+    threading.Thread(target=buscar_evento, daemon=True).start()
+    if SUPORTE:
+        threading.Thread(target=monitorar_tesouro, daemon=True).start()
+        threading.Thread(target=monitorar_status, daemon=True).start()
 
 if __name__ == "__main__":
     threading.Thread(target=_watch_esc, daemon=True).start()

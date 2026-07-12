@@ -41,8 +41,8 @@ POLL_NORMAL = 0.03  # polling padrão do loop de lobby
 POLL_ATT = 0.02  # intervalo entre cliques no botão de atualizar
 CLICK_PAUSE = 0.03  # pausa antes de cada clique
 FOCUS_WAIT = 0.8  # tempo para o Windows processar foco
-ATT_CYCLE_WAIT = 0.6  # espera após cada clique em ATT antes de checar
-ATT_CYCLE_WAIT_NO_CACHE = 2.5  # espera maior quando att.png ainda não tem coordenada em cache (dá tempo de ver a tela)
+ATT_CYCLE_WAIT = 0.15  # espera após cada clique em ATT antes de checar
+ATT_CYCLE_WAIT_NO_CACHE = 0.4  # espera maior quando game.png ainda não tem coordenada em cache (dá tempo de ver a tela)
 MENU_STEP_WAIT = 0.25  # pausa entre cliques no menu (reduzida pela metade)
 SAIR_TIMEOUT = 1.5  # timeout do popup opcional "sair" (reduzido pela metade)
 
@@ -164,19 +164,38 @@ REHOST_MAX: int = SESSION.get("rehost_max", 1)
 LANGUAGE = SESSION.get("language", "pt-br")
 RESOLUTION = SESSION.get("resolution", "1920x1080")
 
+
+def _detect_zoom_pct() -> int:
+    """Escala de exibição do Windows (100/125/150...), não zoom do jogo.
+    Mesma resolução com zoom diferente desloca todos os elementos na tela,
+    então a coordenada em cache de um zoom não serve pro outro."""
+    if sys.platform != "win32":
+        return 100
+    try:
+        return int(ctypes.windll.shcore.GetScaleFactorForDevice(0))
+    except Exception:
+        try:
+            return round(user32.GetDpiForSystem() / 96 * 100)
+        except Exception:
+            return 100
+
+
+ZOOM_PCT = _detect_zoom_pct()
+RESOLUTION_KEY = f"{RESOLUTION}-{ZOOM_PCT}"
+
 _IMG_DIR_WITH_RES = os.path.join("language", LANGUAGE, RESOLUTION, "lobby")
 _IMG_DIR_NO_RES = os.path.join("language", LANGUAGE, "lobby")
 
 IMG_DIR = _IMG_DIR_WITH_RES if os.path.exists(_IMG_DIR_WITH_RES) else _IMG_DIR_NO_RES
 
-# coords/: cache de coordenadas (posição da última imagem achada), um
-# arquivo por resolução. Mesma resolução = mesma posição sempre, então
-# esse arquivo é versionado (ver build.py/.gitignore) pra já vir "quente"
-# pra qualquer usuário na mesma resolução, sem precisar escanear a tela
-# inteira na primeira vez.
+# coords/: cache de coordenadas (posição da última imagem achada), uma
+# arquivo por resolução+zoom. Mesma resolução+zoom = mesma posição sempre,
+# então esse arquivo é versionado (ver build.py/.gitignore) pra já vir
+# "quente" pra qualquer usuário na mesma combinação, sem precisar escanear
+# a tela inteira na primeira vez.
 COORDS_DIR = "coords"
 os.makedirs(COORDS_DIR, exist_ok=True)
-CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION}_lobby.txt")
+CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION_KEY}_lobby.txt")
 
 # Margem escala com a largura da tela: em resoluções ultrawide a lista de
 # lobbies desloca mais os itens, e a janela de 60px (base 1920x1080) errava
@@ -217,11 +236,12 @@ def _matar_irmaos() -> None:
     Pula o próprio .exe na lista: taskkill mata a própria imagem na hora
     (processo some no meio do for), o que abortaria antes de matar os
     outros - o próprio processo já se encerra sozinho com os._exit depois.
+    start.py/start.exe fica de fora: é o launcher, esc não deve derrubá-lo.
     """
     if sys.platform != "win32":
         return
     exe_proprio = os.path.basename(sys.executable).lower() if getattr(sys, "frozen", False) else None
-    for target in ("lobby.exe", "in_game.exe", "painel.exe", "start.exe"):
+    for target in ("lobby.exe", "in_game.exe", "fim_game.exe", "painel.exe"):
         if target.lower() == exe_proprio:
             continue
         try:
@@ -231,7 +251,7 @@ def _matar_irmaos() -> None:
             pass
     ps_script = (
         "Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='pythonw.exe'\" | "
-        "Where-Object { $_.CommandLine -match 'lobby\\.py|in_game\\.py|painel\\.py|start\\.py' } | "
+        "Where-Object { $_.CommandLine -match 'lobby\\.py|in_game\\.py|fim_game\\.py|painel\\.py' } | "
         "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
     )
     try:
@@ -507,7 +527,7 @@ _ROOM_RESULT_ACEITAR = "aceitar"
 _ROOM_RESULT_ERRO = "erro"
 
 
-def _wait_after_room_click(timeout: float = 10) -> str:
+def _wait_after_room_click(timeout: float = 600) -> str:
     deadline = time.time() + timeout
     while time.time() < deadline:
         if locate("erro.png"):
@@ -658,7 +678,7 @@ def step_lobby() -> None:
         time.sleep(CLICK_PAUSE)
         pyautogui.doubleClick()
 
-        result = _wait_after_room_click(timeout=10)
+        result = _wait_after_room_click()
 
         if result == _ROOM_RESULT_ERRO:
             safe_click(locate("erro.png"), pause=0.1)

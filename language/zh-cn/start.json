@@ -12,6 +12,9 @@
     "footer": "© 2026 Bastos Develop. 保留所有权利。",
     "no_xp": "禁用经验值",
     "support": "支持",
+    "sell": "出售",
+    "sell_equipment": "装备",
+    "sell_wings": "翅膀",
     "status_checking_update": "正在检查更新...",
     "status_update_found": "发现更新",
     "status_downloading_update": "正在下载更新..."

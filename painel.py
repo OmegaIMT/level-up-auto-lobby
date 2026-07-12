@@ -87,7 +87,7 @@ def _matar_irmaos() -> None:
     if sys.platform != "win32":
         return
     exe_proprio = os.path.basename(sys.executable).lower() if getattr(sys, "frozen", False) else None
-    for target in ("lobby.exe", "in_game.exe", "painel.exe", "start.exe"):
+    for target in ("lobby.exe", "in_game.exe", "fim_game.exe", "painel.exe"):
         if target.lower() == exe_proprio:
             continue
         try:
@@ -97,7 +97,7 @@ def _matar_irmaos() -> None:
             pass
     ps_script = (
         "Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='pythonw.exe'\" | "
-        "Where-Object { $_.CommandLine -match 'lobby\\.py|in_game\\.py|painel\\.py|start\\.py' } | "
+        "Where-Object { $_.CommandLine -match 'lobby\\.py|in_game\\.py|fim_game\\.py|painel\\.py' } | "
         "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
     )
     try:

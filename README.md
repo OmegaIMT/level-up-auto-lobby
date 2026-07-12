@@ -10,11 +10,11 @@ O bot é dividido em processos independentes, cada um lançado pelo anterior:
 |---|---|
 | `start.py` | GUI (Tkinter) de configuração. Salva `config.json`, checa update no GitHub e lança `lobby.py`/`painel.py`. É o **único** que roda como `.exe`. |
 | `lobby.py` | Abre o Dota, digita senha, busca a sala pelo prefixo `up-`, entra na partida e lança `in_game.py`. |
-| `in_game.py` | Roda durante a partida: desativa XP, coleta bônus/tesouro, organiza mochila, dispara o evento, detecta fim de partida e reinicia o ciclo (`lobby.py`) até bater o `rehost_max`. |
+| `in_game.py` | Roda durante a partida: desativa XP, coleta bônus/tesouro, organiza mochila, dispara o evento e monitora o fim da partida (`count.png`). Ao detectar o fim, lança `fim_game.py` e encerra. |
+| `fim_game.py` | Roda entre partidas: conta a partida, clica cristal/equipamento se atingiu o `rehost_max`, conta ciclos e decide entre fechar o Dota + voltar pro `lobby.py` ou lançar `in_game.py` de novo pra próxima partida do ciclo. |
 | `painel.py` | Overlay transparente e click-through no canto da tela mostrando `partidas/rehost`, `ciclos` e a última imagem buscada (debug ao vivo). |
 | `updater.py` | Auto-update via git (raw `version.txt` + zipball da branch `main`), sem precisar de Release nem rebuild. |
-| `coord.py` | Ferramenta manual (rodar à parte) para capturar coordenadas fixas de clique e gerar `coords_base.json`. |
-| `build.py` + `build.spec` | Empacota **só `start.py`** em `.exe` via PyInstaller e copia `lobby.py`/`in_game.py`/`painel.py`/`language/`/etc pra raiz do `dist/`. |
+| `build.py` + `build.spec` | Empacota `start.py`/`in_game.py`/`fim_game.py`/`lobby.py`/`painel.py` em `.exe` via PyInstaller e copia `language/`/`coords/`/etc pra raiz do `dist/`. |
 
 `lobby.py`, `in_game.py` e `painel.py` de propósito **não** viram `.exe` — rodam sempre como script (`python lobby.py`), lançados pelo `start.exe` via `subprocess`. Isso é o que permite o `updater.py` atualizar o comportamento do bot só dando `git push`, sem rebuildar nem gerar instalador de novo (ver seção "Release / auto-update").
 
@@ -30,7 +30,7 @@ language/global/<resolução>/error/      # telas de erro/desconexão
 
 Idiomas disponíveis: `pt-br`, `en-us`, `ru`, `zh-cn`. Resoluções calibradas: `1920x1080` e `1600x900`.
 
-Coordenadas de clique fixo (mochila, status, gold) ficam em `coords/coords_base.json` e são escaladas em runtime pra resolução configurada. A pasta `coords/` também guarda o cache de posição das imagens (um arquivo por resolução, versionado — mesma resolução sempre acha a imagem no mesmo lugar).
+Coordenadas de clique fixo (mochila, status, gold) ficam em `coords/coords_base_in_game.json` (usado só pelo `in_game.py`) e `coords/coords_base_fim_game.json` (usado só pelo `fim_game.py`), cada bloco chaveado por `"{resolução}-{zoom}"` (ex: `"1920x1080-100"`) e escalado em runtime. A pasta `coords/` também guarda o cache de posição das imagens (um arquivo por resolução+zoom e por processo — `..._in_game.txt`, `..._fim_game.txt`, `..._lobby.txt` — versionado, mesma resolução sempre acha a imagem no mesmo lugar).
 
 ## Pré-requisitos
 
@@ -78,7 +78,7 @@ Gera `installer_output/Dota-Level-Up-Lobby-Setup-<versão>.exe`. O instalador de
 
 O `updater.py` compara o `version.txt` local com o `version.txt` da branch `main` no GitHub (via `raw.githubusercontent.com`). Pra publicar uma atualização:
 
-1. Mexer no que precisar (`lobby.py`, `in_game.py`, `painel.py`, imagens em `language/`, `coords/coords_base.json`, etc).
+1. Mexer no que precisar (`lobby.py`, `in_game.py`, `fim_game.py`, `painel.py`, imagens em `language/`, `coords/coords_base_in_game.json`, `coords/coords_base_fim_game.json`, etc).
 2. Subir a versão em `version.txt` (ex: `2.2.0` -> `2.2.1`).
 3. `git push` pra `main`.
 

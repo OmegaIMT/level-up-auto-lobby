@@ -33,26 +33,30 @@ def _exe(pyz, a, name):
         icon=['level-up.ico'],
     )
 
-a_start   = _analysis('start.py')
-a_in_game = _analysis('in_game.py')
-a_lobby   = _analysis('lobby.py')
-a_painel  = _analysis('painel.py')
+a_start    = _analysis('start.py')
+a_in_game  = _analysis('in_game.py')
+a_fim_game = _analysis('fim_game.py')
+a_lobby    = _analysis('lobby.py')
+a_painel   = _analysis('painel.py')
 
-pyz_start   = PYZ(a_start.pure)
-pyz_in_game = PYZ(a_in_game.pure)
-pyz_lobby   = PYZ(a_lobby.pure)
-pyz_painel  = PYZ(a_painel.pure)
+pyz_start    = PYZ(a_start.pure)
+pyz_in_game  = PYZ(a_in_game.pure)
+pyz_fim_game = PYZ(a_fim_game.pure)
+pyz_lobby    = PYZ(a_lobby.pure)
+pyz_painel   = PYZ(a_painel.pure)
 
-exe_start   = _exe(pyz_start,   a_start,   'start')
-exe_in_game = _exe(pyz_in_game, a_in_game, 'in_game')
-exe_lobby   = _exe(pyz_lobby,   a_lobby,   'lobby')
-exe_painel  = _exe(pyz_painel,  a_painel,  'painel')
+exe_start    = _exe(pyz_start,    a_start,    'start')
+exe_in_game  = _exe(pyz_in_game,  a_in_game,  'in_game')
+exe_fim_game = _exe(pyz_fim_game, a_fim_game, 'fim_game')
+exe_lobby    = _exe(pyz_lobby,    a_lobby,    'lobby')
+exe_painel   = _exe(pyz_painel,   a_painel,   'painel')
 
 coll = COLLECT(
-    exe_start,   a_start.binaries,   a_start.datas,
-    exe_in_game, a_in_game.binaries, a_in_game.datas,
-    exe_lobby,   a_lobby.binaries,   a_lobby.datas,
-    exe_painel,  a_painel.binaries,  a_painel.datas,
+    exe_start,    a_start.binaries,    a_start.datas,
+    exe_in_game,  a_in_game.binaries,  a_in_game.datas,
+    exe_fim_game, a_fim_game.binaries, a_fim_game.datas,
+    exe_lobby,    a_lobby.binaries,    a_lobby.datas,
+    exe_painel,   a_painel.binaries,   a_painel.datas,
     strip=False,
     upx=True,
     upx_exclude=[],
