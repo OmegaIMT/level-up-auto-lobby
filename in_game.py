@@ -48,22 +48,6 @@ def save_config_update(**kwargs) -> None:
 LANGUAGE   = CONFIG.get("language", "pt-br")
 RESOLUTION = CONFIG.get("resolution", "1920x1080")
 
-
-def _detect_zoom_pct() -> int:
-    """Escala de exibição do Windows (100/125/150...), ver lobby.py."""
-    if sys.platform != "win32":
-        return 100
-    try:
-        return int(ctypes.windll.shcore.GetScaleFactorForDevice(0))
-    except Exception:
-        try:
-            return round(user32.GetDpiForSystem() / 96 * 100)
-        except Exception:
-            return 100
-
-
-ZOOM_PCT = _detect_zoom_pct()
-RESOLUTION_KEY = f"{RESOLUTION}-{ZOOM_PCT}"
 NO_XP      = bool(CONFIG.get("no_xp", True))
 SUPORTE    = bool(CONFIG.get("support", True))
 
@@ -83,7 +67,7 @@ PARTIDAS_CONCLUIDAS = int(CONFIG.get("partidas_concluidas", 0))
 # versionado (mesma resolução = mesma posição sempre).
 COORDS_DIR = "coords"
 os.makedirs(COORDS_DIR, exist_ok=True)
-CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION_KEY}_in_game.txt")
+CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION}_in_game.txt")
 try:
     _RES_WIDTH = int(RESOLUTION.lower().split("x")[0])
 except Exception:
@@ -333,18 +317,14 @@ COORDS_ALL = load_coords_base()
 
 BASE_RES = "1920x1080"
 BASE_WIDTH, BASE_HEIGHT = (int(v) for v in BASE_RES.split("x"))
-BASE_COORDS = COORDS_ALL.get(f"{BASE_RES}-100", {}) or COORDS_ALL.get(BASE_RES, {})
+BASE_COORDS = COORDS_ALL.get(BASE_RES, {})
 
-# Bloco com coordenadas reais da resolução+zoom atual (ex: "3440x1440-100"),
-# se existir em coords_base_in_game.json. Quando existe, usamos direto - sem
-# fórmula, sem chute. Cai pro bloco só-resolução (sem zoom) por compat.
-RES_COORDS = (
-    COORDS_ALL.get(RESOLUTION_KEY)
-    or COORDS_ALL.get(RESOLUTION_KEY.lower())
-    or COORDS_ALL.get(RESOLUTION.lower())
-    or COORDS_ALL.get(RESOLUTION)
-    or {}
-)
+# Bloco com coordenadas reais da resolução atual (ex: "3440x1440"), se
+# existir em coords_base_in_game.json. Quando existe, usamos direto - sem
+# fórmula, sem chute. Dota renderiza em pixels reais, não segue a escala de
+# exibição do Windows (100%/125%/...) - a mesma coordenada serve pra
+# qualquer escala, só a resolução importa.
+RES_COORDS = COORDS_ALL.get(RESOLUTION.lower()) or COORDS_ALL.get(RESOLUTION) or {}
 
 def _scale_from_base(coord_base: tuple[int, int]) -> tuple[int, int]:
     """

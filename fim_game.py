@@ -48,23 +48,6 @@ def save_config_update(**kwargs) -> None:
 LANGUAGE   = CONFIG.get("language", "pt-br")
 RESOLUTION = CONFIG.get("resolution", "1920x1080")
 
-
-def _detect_zoom_pct() -> int:
-    """Escala de exibição do Windows (100/125/150...), ver lobby.py."""
-    if sys.platform != "win32":
-        return 100
-    try:
-        return int(ctypes.windll.shcore.GetScaleFactorForDevice(0))
-    except Exception:
-        try:
-            return round(user32.GetDpiForSystem() / 96 * 100)
-        except Exception:
-            return 100
-
-
-ZOOM_PCT = _detect_zoom_pct()
-RESOLUTION_KEY = f"{RESOLUTION}-{ZOOM_PCT}"
-
 # IMG_DIR: bonus.png ("I am the champion"), dependente de idioma.
 IMG_DIR = os.path.join("language", LANGUAGE, RESOLUTION, "in_game")
 
@@ -79,7 +62,7 @@ PARTIDAS_CONCLUIDAS = int(CONFIG.get("partidas_concluidas", 0))
 # separado do de in_game.py (processo diferente).
 COORDS_DIR = "coords"
 os.makedirs(COORDS_DIR, exist_ok=True)
-CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION_KEY}_fim_game.txt")
+CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION}_fim_game.txt")
 try:
     _RES_WIDTH = int(RESOLUTION.lower().split("x")[0])
 except Exception:

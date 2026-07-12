@@ -164,38 +164,20 @@ REHOST_MAX: int = SESSION.get("rehost_max", 1)
 LANGUAGE = SESSION.get("language", "pt-br")
 RESOLUTION = SESSION.get("resolution", "1920x1080")
 
-
-def _detect_zoom_pct() -> int:
-    """Escala de exibição do Windows (100/125/150...), não zoom do jogo.
-    Mesma resolução com zoom diferente desloca todos os elementos na tela,
-    então a coordenada em cache de um zoom não serve pro outro."""
-    if sys.platform != "win32":
-        return 100
-    try:
-        return int(ctypes.windll.shcore.GetScaleFactorForDevice(0))
-    except Exception:
-        try:
-            return round(user32.GetDpiForSystem() / 96 * 100)
-        except Exception:
-            return 100
-
-
-ZOOM_PCT = _detect_zoom_pct()
-RESOLUTION_KEY = f"{RESOLUTION}-{ZOOM_PCT}"
-
 _IMG_DIR_WITH_RES = os.path.join("language", LANGUAGE, RESOLUTION, "lobby")
 _IMG_DIR_NO_RES = os.path.join("language", LANGUAGE, "lobby")
 
 IMG_DIR = _IMG_DIR_WITH_RES if os.path.exists(_IMG_DIR_WITH_RES) else _IMG_DIR_NO_RES
 
-# coords/: cache de coordenadas (posição da última imagem achada), uma
-# arquivo por resolução+zoom. Mesma resolução+zoom = mesma posição sempre,
-# então esse arquivo é versionado (ver build.py/.gitignore) pra já vir
-# "quente" pra qualquer usuário na mesma combinação, sem precisar escanear
-# a tela inteira na primeira vez.
+# coords/: cache de coordenadas (posição da última imagem achada), um
+# arquivo por resolução. Dota renderiza em pixels reais, não segue a escala
+# de exibição do Windows (100%/125%/...), então a mesma resolução sempre
+# cai na mesma coordenada - esse arquivo é versionado (ver build.py/
+# .gitignore) pra já vir "quente" pra qualquer usuário na mesma resolução,
+# sem precisar escanear a tela inteira na primeira vez.
 COORDS_DIR = "coords"
 os.makedirs(COORDS_DIR, exist_ok=True)
-CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION_KEY}_lobby.txt")
+CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION}_lobby.txt")
 
 # Margem escala com a largura da tela: em resoluções ultrawide a lista de
 # lobbies desloca mais os itens, e a janela de 60px (base 1920x1080) errava
