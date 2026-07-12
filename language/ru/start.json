@@ -17,5 +17,6 @@
     "sell_wings": "Крылья",
     "status_checking_update": "Поиск обновлений...",
     "status_update_found": "Обновление найдено",
-    "status_downloading_update": "Загрузка обновления..."
+    "status_downloading_update": "Загрузка обновления...",
+    "status_update_restart": "Обновлено! Перезапуск..."
 }

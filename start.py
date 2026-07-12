@@ -243,12 +243,18 @@ def kill_all_children() -> None:
             except Exception: pass
 
     if sys.platform == "win32":
-        for target in ["lobby.exe", "in_game.exe", "fim_game.exe", "painel.exe"]:
-            try:
-                subprocess.run(["taskkill", "/F", "/IM", target],
-                                startupinfo=HIDDEN_WINDOW, capture_output=True)
-            except Exception:
-                pass
+        # Popen (sem esperar) em vez de run: os alvos sobrevivem ao pai no
+        # Windows, não precisa bloquear pra eles morrerem. Um taskkill só
+        # com múltiplos /IM em vez de um por processo elimina overhead de
+        # spawn repetido — reduz bastante o delay até fechar tudo.
+        try:
+            args = ["taskkill", "/F"]
+            for target in ("lobby.exe", "in_game.exe", "fim_game.exe", "painel.exe"):
+                args += ["/IM", target]
+            subprocess.Popen(args, startupinfo=HIDDEN_WINDOW,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
         # wmic foi removido do Windows 11 (24H2+) — kill por commandline
         # (pega lobby.py/in_game.py/fim_game.py/painel.py rodando soltos,
@@ -260,9 +266,10 @@ def kill_all_children() -> None:
             "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
         )
         try:
-            subprocess.run(
+            subprocess.Popen(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-                startupinfo=HIDDEN_WINDOW, capture_output=True,
+                startupinfo=HIDDEN_WINDOW,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
         except Exception:
             pass
@@ -343,6 +350,10 @@ def _update_worker() -> None:
 
     if resultado.updated:
         print(f"Atualizado para versão {resultado.remote_version} (arquivos: {resultado.updated_files})")
+        # start.exe rodando é o binário antigo (troca por rename só vale pro
+        # próximo processo que abrir esse caminho) - reinicia sozinho pra já
+        # rodar o binário novo, em vez de depender do usuário fechar/abrir.
+        update_queue.put(("restart", None))
     elif resultado.error:
         print(f"Update check: {resultado.error}")
 
@@ -381,6 +392,24 @@ def _apply_update_stage(stage: str, percent: int | None) -> None:
         progress_bar.pack_forget()
         progress_bar["value"] = 0
         label_status.config(text="")
+    elif stage == "restart":
+        # Só reinicia sozinho se o bot ainda não foi iniciado - se
+        # lobby/painel já estão rodando, não interrompe a automação em
+        # andamento (o binário novo passa a valer no próximo start manual).
+        if processo_lobby is None and processo_painel is None:
+            label_status.config(text=TEXT.get("status_update_restart", "Atualizado! Reiniciando..."), foreground="green")
+            root.after(1200, _restart_app)
+
+def _restart_app() -> None:
+    try:
+        if getattr(sys, "frozen", False):
+            subprocess.Popen([sys.executable])
+        else:
+            subprocess.Popen([sys.executable, os.path.abspath(__file__)])
+    except Exception:
+        pass
+    root.destroy()
+    os._exit(0)
 
 def run_update_check_async() -> None:
     threading.Thread(target=_update_worker, daemon=True).start()

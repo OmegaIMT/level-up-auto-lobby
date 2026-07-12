@@ -223,12 +223,20 @@ def _matar_irmaos() -> None:
     if sys.platform != "win32":
         return
     exe_proprio = os.path.basename(sys.executable).lower() if getattr(sys, "frozen", False) else None
-    for target in ("lobby.exe", "in_game.exe", "fim_game.exe", "painel.exe"):
-        if target.lower() == exe_proprio:
-            continue
+    alvos = [t for t in ("lobby.exe", "in_game.exe", "fim_game.exe", "painel.exe") if t != exe_proprio]
+
+    # Popen (sem esperar) em vez de run: os processos-alvo sobrevivem ao
+    # pai no Windows, então não precisa bloquear aqui pra eles morrerem -
+    # só disparar e sair rápido (esc não pode ter delay perceptível).
+    # Um taskkill só com múltiplos /IM em vez de um por processo também
+    # elimina overhead de spawn repetido.
+    if alvos:
         try:
-            subprocess.run(["taskkill", "/F", "/IM", target],
-                            startupinfo=HIDDEN_WINDOW, capture_output=True)
+            args = ["taskkill", "/F"]
+            for t in alvos:
+                args += ["/IM", t]
+            subprocess.Popen(args, startupinfo=HIDDEN_WINDOW,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
     ps_script = (
@@ -237,8 +245,9 @@ def _matar_irmaos() -> None:
         "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
     )
     try:
-        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-                        startupinfo=HIDDEN_WINDOW, capture_output=True)
+        subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+                          startupinfo=HIDDEN_WINDOW,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 

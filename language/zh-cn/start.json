@@ -17,5 +17,6 @@
     "sell_wings": "翅膀",
     "status_checking_update": "正在检查更新...",
     "status_update_found": "发现更新",
-    "status_downloading_update": "正在下载更新..."
+    "status_downloading_update": "正在下载更新...",
+    "status_update_restart": "已更新！正在重启..."
 }

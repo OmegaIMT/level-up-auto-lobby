@@ -17,5 +17,6 @@
     "sell_wings": "Wings",
     "status_checking_update": "Buscando atualização...",
     "status_update_found": "Atualização encontrada",
-    "status_downloading_update": "Baixando atualização..."
+    "status_downloading_update": "Baixando atualização...",
+    "status_update_restart": "Atualizado! Reiniciando..."
 }
