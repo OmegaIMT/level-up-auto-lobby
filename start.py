@@ -6,7 +6,7 @@ import json
 import queue
 import threading
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 
 import updater
@@ -345,7 +345,8 @@ def _update_worker() -> None:
     thread-safe pra mexer em widget direto daqui).
     """
     resultado = updater.check_for_updates(
-        progress_cb=lambda stage, percent=None: update_queue.put((stage, percent))
+        progress_cb=lambda stage, percent=None: update_queue.put((stage, percent)),
+        confirm_cb=_confirm_update,
     )
 
     if resultado.updated:
@@ -356,6 +357,28 @@ def _update_worker() -> None:
         update_queue.put(("restart", None))
     elif resultado.error:
         print(f"Update check: {resultado.error}")
+
+def _confirm_update(remote_version: str, local_version: str) -> bool:
+    """
+    Chamado pela thread do updater quando acha versão nova. messagebox só
+    pode rodar na thread principal do Tkinter, então agenda via root.after e
+    bloqueia a thread do updater (threading.Event) até o usuário responder.
+    """
+    result_holder: dict[str, bool] = {}
+    answered = threading.Event()
+
+    def _ask() -> None:
+        msg = TEXT.get("update_confirm_msg", "Nova atualização disponível ({version}). Deseja baixar agora?").format(version=remote_version)
+        result_holder["answer"] = messagebox.askyesno(
+            TEXT.get("update_confirm_title", "Atualização disponível"),
+            msg,
+        )
+        answered.set()
+
+    root.after(0, _ask)
+    answered.wait()
+    return result_holder.get("answer", False)
+
 
 def _poll_update_queue() -> None:
     try:
@@ -386,7 +409,7 @@ def _apply_update_stage(stage: str, percent: int | None) -> None:
                 progress_bar.stop()
                 progress_bar["mode"] = "determinate"
             progress_bar["value"] = percent
-    elif stage in ("updated", "up_to_date", "error"):
+    elif stage in ("updated", "up_to_date", "declined", "error"):
         progress_bar.stop()
         progress_bar["mode"] = "determinate"
         progress_bar.pack_forget()

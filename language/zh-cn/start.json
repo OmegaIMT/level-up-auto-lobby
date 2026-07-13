@@ -18,5 +18,7 @@
     "status_checking_update": "正在检查更新...",
     "status_update_found": "发现更新",
     "status_downloading_update": "正在下载更新...",
-    "status_update_restart": "已更新！正在重启..."
+    "status_update_restart": "已更新！正在重启...",
+    "update_confirm_title": "有可用更新",
+    "update_confirm_msg": "发现新更新（{version}）。现在下载吗？"
 }

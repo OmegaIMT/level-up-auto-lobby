@@ -45,6 +45,7 @@ ATT_CYCLE_WAIT = 0.15  # espera após cada clique em ATT antes de checar
 ATT_CYCLE_WAIT_NO_CACHE = 0.4  # espera maior quando game.png ainda não tem coordenada em cache (dá tempo de ver a tela)
 MENU_STEP_WAIT = 0.25  # pausa entre cliques no menu (reduzida pela metade)
 SAIR_TIMEOUT = 1.5  # timeout do popup opcional "sair" (reduzido pela metade)
+SALA_TIMEOUT = 170  # sala.png travada (sem erro/aceitar) por mais que isso reinicia o dota
 
 # ==================================================
 # SESSION CONFIG (gerado pelo start.py)
@@ -543,6 +544,9 @@ def _accept_loop() -> bool:
             _launch_in_game()
             return True
 
+        if locate("sala.png"):
+            return False
+
         time.sleep(POLL_FAST)
 
 
@@ -611,6 +615,7 @@ def step_lobby() -> None:
     save_status(rehost_max=REHOST_MAX, current_pw=current_password())
 
     inside_room = False
+    room_enter_time = 0.0
 
     while True:
         # ── ESTADO: dentro de uma sala ──────────────────────────────────────
@@ -635,6 +640,13 @@ def step_lobby() -> None:
 
             if not locate("sala.png"):
                 inside_room = False
+                time.sleep(POLL_FAST)
+                continue
+
+            if time.time() - room_enter_time > SALA_TIMEOUT:
+                _restart_with_current_password()
+                inside_room = False
+                continue
 
             time.sleep(POLL_FAST)
             continue
@@ -649,6 +661,7 @@ def step_lobby() -> None:
 
         if locate("sala.png"):
             inside_room = True
+            room_enter_time = time.time()
             continue
 
         refreshed = _refresh_until_game_appears()
@@ -677,6 +690,7 @@ def step_lobby() -> None:
 
         elif result == _ROOM_RESULT_SALA:
             inside_room = True
+            room_enter_time = time.time()
 
         elif result == _ROOM_RESULT_ACEITAR:
             aceitar = locate("aceitar.png")

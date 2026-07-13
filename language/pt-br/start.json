@@ -18,5 +18,7 @@
     "status_checking_update": "Buscando atualização...",
     "status_update_found": "Atualização encontrada",
     "status_downloading_update": "Baixando atualização...",
-    "status_update_restart": "Atualizado! Reiniciando..."
+    "status_update_restart": "Atualizado! Reiniciando...",
+    "update_confirm_title": "Atualização disponível",
+    "update_confirm_msg": "Nova atualização disponível ({version}). Deseja baixar agora?"
 }

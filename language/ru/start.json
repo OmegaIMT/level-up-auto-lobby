@@ -18,5 +18,7 @@
     "status_checking_update": "Поиск обновлений...",
     "status_update_found": "Обновление найдено",
     "status_downloading_update": "Загрузка обновления...",
-    "status_update_restart": "Обновлено! Перезапуск..."
+    "status_update_restart": "Обновлено! Перезапуск...",
+    "update_confirm_title": "Доступно обновление",
+    "update_confirm_msg": "Доступно новое обновление ({version}). Загрузить сейчас?"
 }

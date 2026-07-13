@@ -48,10 +48,16 @@ import zipfile
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
-# stage: "checking" | "found" | "downloading" | "updated" | "up_to_date" | "error"
+# stage: "checking" | "found" | "downloading" | "updated" | "up_to_date" | "declined" | "error"
 # percent: 0-100 durante "downloading" (None se o servidor não mandar
 # Content-Length — raro em asset de Release, mas tratado mesmo assim).
 ProgressCallback = Callable[[str, Optional[int]], None]
+
+# Chamado com (remote_version, local_version) quando uma versão nova é
+# encontrada, antes de baixar. Retorna True para prosseguir com o download,
+# False para recusar. Bloqueia a thread do updater até o usuário responder —
+# quem passar esse callback (ex: start.py) deve sincronizar com a thread da UI.
+ConfirmCallback = Callable[[str, str], bool]
 
 
 def _notify(cb: Optional[ProgressCallback], stage: str, percent: Optional[int] = None) -> None:
@@ -254,7 +260,10 @@ def _safe_replace(src: str, dst: str) -> bool:
         return False
 
 
-def check_for_updates(progress_cb: Optional[ProgressCallback] = None) -> UpdateResult:
+def check_for_updates(
+    progress_cb: Optional[ProgressCallback] = None,
+    confirm_cb: Optional[ConfirmCallback] = None,
+) -> UpdateResult:
     """
     Compara version.json local com o do repo (main). Se tiver versão nova,
     baixa o asset .zip da Release mais recente (build já compilado) e
@@ -265,7 +274,12 @@ def check_for_updates(progress_cb: Optional[ProgressCallback] = None) -> UpdateR
 
     progress_cb(stage, percent), se passado, é chamado nos estágios:
     "checking" -> "up_to_date"/"error" (para) ou "found" -> "downloading"
-    (com percent) -> "updated"/"error".
+    (com percent) -> "updated"/"error"/"declined".
+
+    confirm_cb(remote_version, local_version), se passado, é chamado logo
+    após "found" e antes de baixar o .zip — se retornar False, o download é
+    cancelado (usuário recusou) e o version.json local não é tocado, então
+    a próxima checagem pergunta de novo.
     """
     result = UpdateResult()
 
@@ -284,6 +298,10 @@ def check_for_updates(progress_cb: Optional[ProgressCallback] = None) -> UpdateR
         return result  # já está na versão mais recente
 
     _notify(progress_cb, "found")
+
+    if confirm_cb is not None and not confirm_cb(remote_version, local_version):
+        _notify(progress_cb, "declined")
+        return result
 
     zip_url = _get_latest_release_zip_url()
     if zip_url is None:
