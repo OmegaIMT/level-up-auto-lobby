@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import glob
 import threading
 import subprocess
 import pyautogui
@@ -118,9 +119,13 @@ SELL_EQUIPMENT = CONFIG.get("sell_equipment", {})
 # vender wings/equipamento.
 ENDLESS = bool(CONFIG.get("endless", False))
 ENDLESS_CLICK_DELAY = 0.5
-# Clique no template dog.png cai um pouco abaixo do centro (que é o texto do
-# label) - o alvo real (a montaria/npc) fica mais pra baixo.
-DOG_CLICK_Y_OFFSET = 20
+# dog.png agora é só o texto do label (sem a montaria - sprite anima e não
+# batia sempre). A montaria/npc clicável fica abaixo do texto, a uma
+# distância que escala com o tamanho do template encontrado (resolução e
+# zoom do mapa variam - offset fixo em pixel não acompanha). Clique cai em
+# box.top + box.height * DOG_CLICK_Y_RATIO - chute inicial, calibrar vendo
+# onde cai de verdade no jogo.
+DOG_CLICK_Y_RATIO = 2.3
 
 # Tempo (s) esperando fonte.png aparecer após count sumir (fim de partida
 # concluída, ainda não bateu rehost_max). Se estourar, mesmo fluxo dos
@@ -290,6 +295,37 @@ def locate(cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir:
         _cache_save_entry(cache_key, pos[0], pos[1])
     return pos
 
+def _locate_box_raw(path: str, confidence: float, region: Optional[Region] = None):
+    try:
+        return pyautogui.locateOnScreen(path, confidence=confidence, region=region)
+    except Exception:
+        return None
+
+def locate_box(cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir: str = IMG_DIR):
+    """Igual locate(), mas devolve a caixa (left, top, width, height) em vez
+    do centro - usado quando o clique real não é no centro do template e
+    precisa escalar com o tamanho encontrado (ex: dog.png, ver
+    DOG_CLICK_Y_RATIO)."""
+    full_path = os.path.join(base_dir, *path_parts)
+    if not os.path.exists(full_path):
+        return None
+
+    cached = _coord_cache.get(cache_key)
+    if cached is not None:
+        cx, cy = cached
+        region: Region = (max(0, cx - CACHE_MARGIN), max(0, cy - CACHE_MARGIN), CACHE_MARGIN * 2, CACHE_MARGIN * 2)
+        box = _locate_box_raw(full_path, confidence, region=region)
+        if box:
+            _update_debug(cache_key, True)
+            return box
+        _cache_invalidate(cache_key)
+
+    box = _locate_box_raw(full_path, confidence)
+    _update_debug(cache_key, box is not None)
+    if box:
+        _cache_save_entry(cache_key, box.left + box.width // 2, box.top + box.height // 2)
+    return box
+
 def descansar_mouse() -> None:
     """Canto da tela, não o centro: os popups de fim de ciclo (fonte,
     cristal/equipamento) aparecem centralizados, e o cursor parado em cima
@@ -378,18 +414,20 @@ def _rodar_com_retry_bonus(fluxo) -> None:
         if not _bonus_interrupt.is_set():
             return
 
-def _clicar_vender(coords: dict, chave: str, espera: float = 1.0, pre_delay: float = 0.05) -> None:
+def _clicar_vender(coords: dict, chave: str, espera: float = 0.3, pre_delay: float = 0.05) -> None:
     pos = coords.get(chave)
     if not pos:
         return
     click_pos(tuple(pos), delay_after=espera, rest=False, pre_delay=pre_delay)
 
 # Confirmação visual (forja.png/pena.png) de que a loja realmente abriu
-# depois do clique no botão - imagens fixas (idioma-independente), sempre em
-# 1920x1080 (mesma convenção dos ícones de rank do start.py).
-CONFIRM_BUTTON_DIR = os.path.join("language", "global", "1920x1080", "buttons")
+# depois do clique no botão - imagens fixas (idioma-independente), mas
+# comparadas contra a tela do jogo de verdade, então tem que ser da
+# resolução certa (diferente dos ícones de rank do start.py, que só
+# desenham na própria janela Tkinter e não precisam bater com a tela).
+CONFIRM_BUTTON_DIR = os.path.join("language", "global", RESOLUTION, "buttons")
 CONFIRM_SHOP_MAX_TENTATIVAS = 5
-CONFIRM_SHOP_TIMEOUT = 5.0
+CONFIRM_SHOP_TIMEOUT = 4.0
 
 def _abrir_loja_com_confirmacao(coords: dict, botao_key: str, cache_key: str, img_name: str) -> bool:
     """Clica botao_key (abre a loja) e espera a confirmação visual
@@ -423,9 +461,9 @@ def vender_wings() -> None:
     _clicar_vender(c, "buy")
     for rank in ranks:
         _clicar_vender(c, f"wing_{rank}")
-    _clicar_vender(c, "buy_2", 3.0)
-    _clicar_vender(c, "confirm")
-    _clicar_vender(c, "ok")
+    _clicar_vender(c, "buy_2")
+    _clicar_vender(c, "confirm", 0.8)
+    _clicar_vender(c, "ok", 0.8)
     _clicar_vender(c, "closer")
     _clicar_vender(c, "closer")   
     _clicar_vender(c, "wing_shop")
@@ -461,25 +499,27 @@ def _aguardar_endless_e_clicar(timeout: float = 60) -> bool:
 
 ENDLESS_MAX_TENTATIVAS = 5
 
-def _aguardar_dog_e_clicar(timeout: float = 10) -> bool:
-    """Espera language/<lang>/.../in_game/dog.png aparecer (label + montaria
-    do Endless Trial no mapa) e clica um pouco abaixo do centro do template -
-    posição de clique fixa (coord) não funciona porque o mapa muda de lugar
-    (bug do próprio jogo). 2 cliques separados (mesmo motivo do hero) e, só
-    aqui, move o mouse pro slot_20 depois - descansa longe do mapa."""
+def _dog_templates() -> list[str]:
+    """dog.png, dog_1.png, dog_2.png... - o texto do label não muda, mas a
+    montaria embaixo é animada (pose diferente a cada captura), então um
+    template só não bate sempre. Lista tudo que existir, na ordem."""
+    paths = sorted(glob.glob(os.path.join(IMG_DIR, "dog*.png")))
+    return [os.path.basename(p) for p in paths]
+
+def _aguardar_dog_e_clicar(timeout: float = 3) -> bool:
+    """Espera algum dog*.png (só o texto do label do Endless Trial no mapa)
+    aparecer e clica abaixo dele, na montaria/npc - posição de clique fixa
+    (coord) não funciona porque o mapa muda de lugar (bug do próprio jogo).
+    Offset escala com o tamanho do template achado (locate_box), não é
+    pixel fixo - acompanha resolução/zoom do mapa."""
     started = time.time()
     while True:
-        pos = locate("dog_ingame", "dog.png", confidence=0.75)
-        if pos:
-            target = (pos[0], pos[1] + DOG_CLICK_Y_OFFSET)
-            click_pos(target, delay_after=0.15, rest=False)
-            click_pos(target, delay_after=ENDLESS_CLICK_DELAY, rest=False)
-            if SLOT_20:
-                try:
-                    pyautogui.moveTo(*SLOT_20)
-                except Exception:
-                    pass
-            return True
+        for name in _dog_templates():
+            box = locate_box("dog_ingame", name, confidence=0.75)
+            if box:
+                target = (box.left + box.width // 2, box.top + int(box.height * DOG_CLICK_Y_RATIO))
+                click_pos(target, delay_after=ENDLESS_CLICK_DELAY, rest=False)
+                return True
         if time.time() - started > timeout:
             return False
         time.sleep(0.5)
@@ -498,6 +538,12 @@ def ativar_endless() -> None:
         # reconhece o evento de double-click do SO (ver lobby.py).
         click_pos(hero, delay_after=0.15, rest=False)
         click_pos(hero, delay_after=ENDLESS_CLICK_DELAY, rest=False)
+        if SLOT_20:
+            try:
+                pyautogui.press("f3")
+                pyautogui.moveTo(*SLOT_20)
+            except Exception:
+                pass
     for _ in range(ENDLESS_MAX_TENTATIVAS):
         if _aguardar_dog_e_clicar() and _aguardar_endless_e_clicar(timeout=3):
             break
