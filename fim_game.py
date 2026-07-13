@@ -335,23 +335,22 @@ def _clicar_vender(coords: dict, chave: str, espera: float = 1.0) -> None:
 
 def vender_wings() -> None:
     """
-    Pra cada rank marcado em Wings (ordem b/a/s/ss/sss/ex): abre a loja,
-    compra, confirma e fecha. Reabre a loja do zero a cada rank - só o
-    primeiro open espera 10s (carregando), os de volta são 1s (loja "quente").
+    Abre a loja de Wings uma única vez e vende todos os ranks marcados em
+    sequência (sem fechar/reabrir entre um e outro) - só fecha no final.
     """
     ranks = [r for r in RANKS_ORDER if SELL_WINGS.get(r)]
     if not ranks or not WINGS_COORDS:
         return
     c = WINGS_COORDS
-    for i, rank in enumerate(ranks):
-        _clicar_vender(c, "wing_shop", 10.0 if i == 0 else 1.0)
-        _clicar_vender(c, "wings")
+    _clicar_vender(c, "wing_shop", 10.0)
+    _clicar_vender(c, "wings")
+    for rank in ranks:
         _clicar_vender(c, "buy")
         _clicar_vender(c, f"wing_{rank}")
         _clicar_vender(c, "buy_2", 5.0)
         _clicar_vender(c, "confirm")
         _clicar_vender(c, "ok")
-        _clicar_vender(c, "closer")
+    _clicar_vender(c, "closer")
 
 def vender_equipamento() -> None:
     """Mesma lógica do vender_wings, fluxo de Equipamento (forja/upgrade)."""
@@ -359,12 +358,12 @@ def vender_equipamento() -> None:
     if not ranks or not EQUIP_COORDS:
         return
     c = EQUIP_COORDS
-    for i, rank in enumerate(ranks):
-        _clicar_vender(c, "equip_forge", 10.0 if i == 0 else 1.0)
+    _clicar_vender(c, "equip_forge", 10.0)
+    for rank in ranks:
         _clicar_vender(c, "upgrade")
         _clicar_vender(c, f"equip_{rank}")
         _clicar_vender(c, "confirm", 5.0)
-        _clicar_vender(c, "closer")
+    _clicar_vender(c, "closer")
 
 def aguardar_count_reaparecer(timeout: float = 60) -> bool:
     """Sincroniza a troca entre wings->equipamento: espera a tela voltar
