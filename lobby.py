@@ -436,9 +436,9 @@ def step_up_name() -> None:
     pyautogui.hotkey("ctrl", "a")
     time.sleep(0.05)
     pyautogui.press("delete")
-    time.sleep(0.1)
+    time.sleep(0.2)
 
-    pyautogui.write(UP_PREFIX, interval=0.05)
+    pyautogui.write(UP_PREFIX, interval=0.07)
     time.sleep(0.3)
 
 

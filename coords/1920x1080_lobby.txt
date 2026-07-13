@@ -1,5 +1,5 @@
-image.png=1126,30
 fim.png=959,765
+image.png=1126,30
 lista.png=884,84
 lobby.png=918,834
 ok.png=1004,604
