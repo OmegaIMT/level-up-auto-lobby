@@ -93,6 +93,7 @@ TEXT = {}
 RANKS = ["b", "a", "s", "ss", "sss", "ex"]
 BUTTON_IMG_DIR = os.path.join("language", "global", "1920x1080", "buttons")
 _rank_icons: dict[str, ImageTk.PhotoImage] = {}
+_endless_icon: ImageTk.PhotoImage | None = None
 
 def load_rank_icons(canvas_size: int = 44) -> None:
     """Cola o ícone no tamanho nativo (sem redimensionar) num canvas
@@ -107,6 +108,16 @@ def load_rank_icons(canvas_size: int = 44) -> None:
         canvas = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
         canvas.paste(img, ((canvas_size - img.width) // 2, (canvas_size - img.height) // 2), img)
         _rank_icons[rank] = ImageTk.PhotoImage(canvas)
+
+def load_endless_icon(max_width: int = 300, max_height: int = 60) -> None:
+    global _endless_icon
+    path = os.path.join(BUTTON_IMG_DIR, "endless.png")
+    if not os.path.exists(path):
+        return
+    img = Image.open(path).convert("RGBA")
+    if img.width > max_width or img.height > max_height:
+        img.thumbnail((max_width, max_height), Image.LANCZOS)
+    _endless_icon = ImageTk.PhotoImage(img)
 
 SELECTED_BG = "#4a90d9"  # cor única de destaque pra todo rank marcado (padronizado)
 
@@ -130,6 +141,23 @@ def build_rank_row(parent: ttk.Frame) -> dict[str, tk.BooleanVar]:
         var.trace_add("write", _on_change)
         lbl.bind("<Button-1>", lambda _event, v=var: v.set(not v.get()))
     return variables
+
+def build_endless_toggle(parent: ttk.Frame) -> tk.BooleanVar:
+    """Mesmo esquema do build_rank_row (Label + clique próprio), só que pra
+    um item único (endless.png já é o próprio rótulo, sem ícone + texto)."""
+    row = ttk.Frame(parent)
+    row.pack(pady=(4, 8))
+    idle_bg = row.winfo_toplevel().cget("bg")
+    var = tk.BooleanVar()
+    lbl = tk.Label(row, image=_endless_icon, bg=idle_bg, bd=0, padx=3, pady=2)
+    lbl.pack()
+
+    def _on_change(*_args):
+        lbl.config(bg=SELECTED_BG if var.get() else idle_bg)
+
+    var.trace_add("write", _on_change)
+    lbl.bind("<Button-1>", lambda _event: var.set(not var.get()))
+    return var
 
 def load_language(language_folder: str) -> None:
     global TEXT
@@ -177,6 +205,8 @@ def apply_saved_config(saved: dict) -> None:
     equipment_var.set(bool(saved.get("equipment", False)))
     no_xp_var.set(bool(saved.get("no_xp", False)))
     support_var.set(bool(saved.get("support", False)))
+    center_var.set(bool(saved.get("center", False)))
+    endless_var.set(bool(saved.get("endless", False)))
 
     saved_sell_equipment = saved.get("sell_equipment", {})
     for rank, var in sell_equipment_vars.items():
@@ -203,7 +233,9 @@ def atualizar_interface_idioma(event=None) -> None:
     chk_equipment.config(text=TEXT.get("equipment", "Equipamentos"))
     chk_no_xp.config(text=TEXT.get("no_xp", "Desativar XP"))
     chk_support.config(text=TEXT.get("support", "Suporte"))
+    chk_center.config(text=TEXT.get("center", "Centro"))
     vender_frame.config(text=TEXT.get("sell", "Vender"))
+    bonus_frame.config(text=TEXT.get("bonus", "Bonus"))
     lbl_sell_equipment.config(text=TEXT.get("sell_equipment", "Equipamento"))
     lbl_sell_wings.config(text=TEXT.get("sell_wings", "Wings"))
     btn_start.config(text=TEXT.get("start", "Start"))
@@ -306,6 +338,8 @@ def start() -> None:
         "equipment": equipment_var.get(),
         "no_xp": no_xp_var.get(),
         "support": support_var.get(),
+        "center": center_var.get(),
+        "endless": endless_var.get(),
         "sell_equipment": {rank: var.get() for rank, var in sell_equipment_vars.items()},
         "sell_wings": {rank: var.get() for rank, var in sell_wings_vars.items()},
     }
@@ -454,6 +488,7 @@ if __name__ == "__main__":
 
     root.protocol("WM_DELETE_WINDOW", on_close)
     load_rank_icons()
+    load_endless_icon()
 
     content = ttk.Frame(root, padding=15)
     content.pack(fill="both", expand=True)
@@ -515,18 +550,32 @@ if __name__ == "__main__":
     support_var = tk.BooleanVar()
     chk_support = ttk.Checkbutton(checkbox_row_2, variable=support_var)
     chk_support.pack(side="left")
+    center_var = tk.BooleanVar()
+    chk_center = ttk.Checkbutton(checkbox_row_2, variable=center_var)
+    chk_center.pack(side="left", padx=(20, 0))
 
-    # Painel "Vender": rank (ícone) de equipamento/wings a vender quando aparecer
-    vender_frame = ttk.LabelFrame(content, labelanchor="n")
-    vender_frame.pack(side="left", fill="y", padx=(15, 0))
+    # Coluna direita: painel "Vender" (rank de equipamento/wings a vender) em
+    # cima, painel "Bonus" (toggle endless) embaixo - bordas finas, style
+    # próprio, mais discretas que o LabelFrame padrão do tema.
+    right_style = ttk.Style()
+    right_style.configure("Vender.TLabelframe", borderwidth=1)
+    right_column = ttk.Frame(content)
+    right_column.pack(side="left", fill="y", padx=(15, 0))
+
+    vender_frame = ttk.LabelFrame(right_column, labelanchor="n", style="Vender.TLabelframe")
+    vender_frame.pack(side="top", fill="x")
 
     lbl_sell_equipment = ttk.Label(vender_frame, anchor="center")
     lbl_sell_equipment.pack(fill="x", pady=(10, 0), padx=10)
     sell_equipment_vars = build_rank_row(vender_frame)
 
     lbl_sell_wings = ttk.Label(vender_frame, anchor="center")
-    lbl_sell_wings.pack(fill="x", pady=(4, 0), padx=10)
+    lbl_sell_wings.pack(fill="x", pady=(4, 8), padx=10)
     sell_wings_vars = build_rank_row(vender_frame)
+
+    bonus_frame = ttk.LabelFrame(right_column, labelanchor="n", style="Vender.TLabelframe")
+    bonus_frame.pack(side="top", fill="x", pady=(8, 0))
+    endless_var = build_endless_toggle(bonus_frame)
 
     # Botões e Status
     btn_start = ttk.Button(frame, command=start)

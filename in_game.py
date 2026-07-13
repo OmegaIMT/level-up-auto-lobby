@@ -50,6 +50,7 @@ RESOLUTION = CONFIG.get("resolution", "1920x1080")
 
 NO_XP      = bool(CONFIG.get("no_xp", True))
 SUPORTE    = bool(CONFIG.get("support", True))
+CENTRO     = bool(CONFIG.get("center", False))
 
 # IMG_DIR: agora só guarda o que continua dependente de idioma (count).
 IMG_DIR = os.path.join("language", LANGUAGE, RESOLUTION, "in_game")
@@ -730,6 +731,17 @@ def monitor_match() -> None:
 
         time.sleep(POLL_IN_GAME)
 
+CENTRO_DELAY = 5.0
+
+def centralizar_camera() -> None:
+    """CENTRO ligado: dá F3 (centraliza câmera no herói) uns segundos depois
+    da partida começar."""
+    time.sleep(CENTRO_DELAY)
+    try:
+        pyautogui.press("f3")
+    except Exception:
+        pass
+
 def iniciar_partida():
     _stop_extras.clear()
 
@@ -743,6 +755,8 @@ def iniciar_partida():
     if SUPORTE:
         threading.Thread(target=monitorar_tesouro, daemon=True).start()
         threading.Thread(target=monitorar_status, daemon=True).start()
+    if CENTRO:
+        threading.Thread(target=centralizar_camera, daemon=True).start()
 
 if __name__ == "__main__":
     threading.Thread(target=_watch_esc, daemon=True).start()

@@ -1,0 +1,4 @@
+pena_confirm=979,922
+forja_confirm=1030,521
+count=957,104
+dog_ingame=717,570
