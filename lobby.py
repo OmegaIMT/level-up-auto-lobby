@@ -38,7 +38,7 @@ HIDDEN_WINDOW.wShowWindow = 0
 # ==================================================
 POLL_FAST = 0.08  # polling reativo (aguardando aceitar/erro) — 33Hz era exagero pra UI, 12Hz já é bem mais rápido que reação humana e derruba CPU ~3x
 POLL_NORMAL = 0.03  # polling padrão do loop de lobby
-POLL_ATT = 0.02  # intervalo entre cliques no botão de atualizar
+POLL_ATT = 0.05  # intervalo entre cliques no botão de atualizar
 CLICK_PAUSE = 0.03  # pausa antes de cada clique
 FOCUS_WAIT = 0.8  # tempo para o Windows processar foco
 ATT_CYCLE_WAIT = 0.15  # espera após cada clique em ATT antes de checar
