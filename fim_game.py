@@ -352,7 +352,7 @@ def vender_wings() -> None:
     _clicar_vender(c, "buy_2", 3.0)
     _clicar_vender(c, "confirm")
     _clicar_vender(c, "ok")
-    _clicar_vender(c, "erro")
+    _clicar_vender(c, "closer")
     _clicar_vender(c, "closer")
 
 def vender_equipamento() -> None:
@@ -366,7 +366,7 @@ def vender_equipamento() -> None:
     for rank in ranks:
         _clicar_vender(c, f"equip_{rank}")
     _clicar_vender(c, "confirm", 3.0)
-    _clicar_vender(c, "erro")
+    _clicar_vender(c, "closer")
     _clicar_vender(c, "closer")
 
 def aguardar_count_reaparecer(timeout: float = 60) -> bool:
