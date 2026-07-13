@@ -658,15 +658,11 @@ def step_lobby() -> None:
             wait_for("200.png", timeout=30)
             continue
 
-        # Game encontrado → quatro cliques simples em sequência na posição já
+        # Game encontrado → dois cliques simples em sequência na posição já
         # capturada. pyautogui.doubleClick() manda um evento de double-click
         # de SO que o Dota às vezes não reconhece (mouse chega mas não entra
         # na sala) - cliques separados replicam o que já funcionava.
         pyautogui.moveTo(game[0], game[1])
-        time.sleep(CLICK_PAUSE)
-        pyautogui.click()
-        time.sleep(CLICK_PAUSE)
-        pyautogui.click()
         time.sleep(CLICK_PAUSE)
         pyautogui.click()
         time.sleep(CLICK_PAUSE)
