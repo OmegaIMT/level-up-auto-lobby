@@ -553,19 +553,25 @@ def _accept_loop() -> bool:
 # ==================================================
 # LOOP DE ATT INTELIGENTE
 # ==================================================
-def _refresh_until_game_appears() -> bool:
+def _refresh_until_game_appears() -> Optional[tuple[int, int]]:
     """
     Clica em ATT continuamente em paralelo enquanto monitora se game.png aparece.
     Também monitora se full.png aparece; caso apareça, clica para fechar e continua.
+
+    Retorna a posição de game.png já capturada pelo observer no instante em
+    que achou - quem chama NÃO deve re-buscar (re-locate depois de parar as
+    threads corre risco de a lista já ter rolado/mudado e a imagem sumir,
+    fazendo o fluxo cair de novo no clique em ATT e perder a sala).
     """
     att = locate("att.png")
     if not att:
-        return False
+        return None
 
     save_status(current_pw=current_password(), password_deadline=0.0)
 
     found_event = threading.Event()
     stop_event = threading.Event()
+    found_pos: list[Optional[tuple[int, int]]] = [None]
 
     def _clicker() -> None:
         current_att = att
@@ -578,8 +584,10 @@ def _refresh_until_game_appears() -> bool:
 
     def _observer() -> None:
         while not stop_event.is_set():
-            # 1. Verifica se o jogo foi encontrado
-            if locate("game.png", confidence=0.7):
+            # 1. Verifica se o jogo foi encontrado - clica na hora, sem re-buscar depois
+            pos = locate("game.png", confidence=0.7)
+            if pos:
+                found_pos[0] = pos
                 found_event.set()
                 return
 
@@ -596,12 +604,12 @@ def _refresh_until_game_appears() -> bool:
     clicker_thread.start()
     observer_thread.start()
 
-    found = found_event.wait()  # Aguarda sem timeout
+    found_event.wait()  # Aguarda sem timeout
     stop_event.set()
     clicker_thread.join(timeout=2)
     observer_thread.join(timeout=2)
 
-    return found
+    return found_pos[0]
 
 # ==================================================
 # STEP LOBBY
@@ -664,8 +672,8 @@ def step_lobby() -> None:
             room_enter_time = time.time()
             continue
 
-        refreshed = _refresh_until_game_appears()
-        if not refreshed:
+        game = _refresh_until_game_appears()
+        if not game:
             safe_click(locate("image.png"))
             time.sleep(MENU_STEP_WAIT)
             safe_click(locate("lista.png"))
@@ -673,11 +681,7 @@ def step_lobby() -> None:
             wait_for("200.png", timeout=30)
             continue
 
-        # Game encontrado → duplo-clique
-        game = locate("game.png", confidence=0.7)
-        if not game:
-            continue
-
+        # Game encontrado → duplo-clique imediato na posição já capturada
         pyautogui.moveTo(game[0], game[1])
         time.sleep(CLICK_PAUSE)
         pyautogui.doubleClick()

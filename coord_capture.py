@@ -61,9 +61,9 @@ RESOLUTION = CONFIG.get("resolution", "1920x1080")
 # mesma chave.
 SECTIONS: list[tuple[str, list[str]]] = [
     ("wings", ["wing_shop", "wings", "buy", "wing_b", "wing_a", "wing_s",
-               "wing_ss", "wing_sss", "wing_ex", "buy_2", "confirm", "ok", "closer"]),
+               "wing_ss", "wing_sss", "wing_ex", "buy_2", "confirm", "ok", "closer", "erro"]),
     ("equipamento", ["equip_forge", "upgrade", "equip_b", "equip_a", "equip_s",
-                      "equip_ss", "equip_sss", "equip_ex", "confirm", "closer"]),
+                      "equip_ss", "equip_sss", "equip_ex", "confirm", "closer", "erro"]),
 ]
 
 STEPS: list[tuple[str, str]] = [(secao, chave) for secao, chaves in SECTIONS for chave in chaves]
