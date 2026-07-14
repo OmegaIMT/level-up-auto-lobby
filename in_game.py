@@ -101,8 +101,31 @@ pyautogui.FAILSAFE = True
 _mouse_lock = threading.RLock()
 _stop_extras = threading.Event()
 
-# Serializa status/tesouro: uma vez por vez, nunca simultâneo (fila de espera).
-_extras_lock = threading.Lock()
+# Fila de espera: serializa TODAS as ações de suporte (subir status, tesouro,
+# F3 de centralizar câmera) - nunca duas rodando ao mesmo tempo. Quem chama
+# entra na fila; só o primeiro a achar a fila vazia processa (worker), em
+# ordem de chegada, com 0.5s de respiro entre uma execução e outra.
+_extras_queue: list[tuple] = []
+_extras_queue_lock = threading.Lock()
+
+def run_extra(fn, *args, **kwargs) -> None:
+    with _extras_queue_lock:
+        _extras_queue.append((fn, args, kwargs))
+        if len(_extras_queue) > 1:
+            return  # já tem worker processando a fila, só entra na lista
+
+    while True:
+        with _extras_queue_lock:
+            f, a, kw = _extras_queue[0]
+        try:
+            f(*a, **kw)
+        except Exception:
+            pass
+        with _extras_queue_lock:
+            _extras_queue.pop(0)
+            if not _extras_queue:
+                return
+        time.sleep(0.5)
 
 STATUS_FILE = "status.json"
 
@@ -485,65 +508,66 @@ def subir_status() -> None:
 
     _click_at(*gold_pos, delay=0.5)
 
+def _status_cycle() -> None:
+    try:
+        loja_aberta = locate("shop", "shop.png", confidence=0.75) is not None
+
+        if GOLD_BASE and not loja_aberta:
+            _click_at(*scale_coord(GOLD_BASE), delay=0.5)
+
+        if _stop_extras.is_set():
+            return
+
+        hammer_pos = locate("hammer", "suporte", "hammer.png", confidence=0.8, base_dir=GLOBAL_DIR)
+        pill_pos = locate("pill", "suporte", "pill.png", confidence=0.8, base_dir=GLOBAL_DIR)
+
+        if hammer_pos or pill_pos:
+            if STATUS_11_BASE:
+                pos = scale_coord(STATUS_11_BASE)
+                for _ in range(3):
+                    if _stop_extras.is_set():
+                        break
+                    _click_at(*pos, delay=0.5)
+            if not _stop_extras.is_set() and STATUS_12_BASE:
+                pos = scale_coord(STATUS_12_BASE)
+                for _ in range(2):
+                    if _stop_extras.is_set():
+                        break
+                    _click_at(*pos, delay=0.5)
+            if _stop_extras.is_set():
+                return
+            verificar_e_mover_itens_slots([0, 1, 2, 3])
+        else:
+            shop_global_pos = locate("shop_global", "shop.png", confidence=0.75, base_dir=GLOBAL_DIR)
+            if not shop_global_pos and STATUS_BASE:
+                pos = scale_coord(STATUS_BASE)
+                for _ in range(8):
+                    if _stop_extras.is_set():
+                        break
+                    _click_at(*pos, delay=0.5)
+            else:
+                for status_base in STATUS_LIST_BASE:
+                    if _stop_extras.is_set():
+                        break
+                    if status_base:
+                        x, y = scale_coord(status_base)
+                        _click_at(x, y, right=True, delay=0.1)
+            if _stop_extras.is_set():
+                return
+            verificar_e_mover_itens_slots([0, 1, 2, 3])
+
+        if _stop_extras.is_set():
+            return
+
+        if GOLD_BASE:
+            _click_at(*scale_coord(GOLD_BASE), delay=0.5)
+
+    except Exception:
+        pass
+
 def monitorar_status() -> None:
     while not _stop_extras.is_set():
-        with _extras_lock:
-            try:
-                loja_aberta = locate("shop", "shop.png", confidence=0.75) is not None
-
-                if GOLD_BASE and not loja_aberta:
-                    _click_at(*scale_coord(GOLD_BASE), delay=0.5)
-
-                if _stop_extras.is_set():
-                    break
-
-                hammer_pos = locate("hammer", "suporte", "hammer.png", confidence=0.8, base_dir=GLOBAL_DIR)
-                pill_pos = locate("pill", "suporte", "pill.png", confidence=0.8, base_dir=GLOBAL_DIR)
-
-                if hammer_pos or pill_pos:
-                    if STATUS_11_BASE:
-                        pos = scale_coord(STATUS_11_BASE)
-                        for _ in range(3):
-                            if _stop_extras.is_set():
-                                break
-                            _click_at(*pos, delay=0.5)
-                    if not _stop_extras.is_set() and STATUS_12_BASE:
-                        pos = scale_coord(STATUS_12_BASE)
-                        for _ in range(2):
-                            if _stop_extras.is_set():
-                                break
-                            _click_at(*pos, delay=0.5)
-                    if _stop_extras.is_set():
-                        break
-                    verificar_e_mover_itens_slots([0, 1, 2, 3])
-                else:
-                    shop_global_pos = locate("shop_global", "shop.png", confidence=0.75, base_dir=GLOBAL_DIR)
-                    if not shop_global_pos and STATUS_BASE:
-                        pos = scale_coord(STATUS_BASE)
-                        for _ in range(8):
-                            if _stop_extras.is_set():
-                                break
-                            _click_at(*pos, delay=0.5)
-                    else:
-                        for status_base in STATUS_LIST_BASE:
-                            if _stop_extras.is_set():
-                                break
-                            if status_base:
-                                x, y = scale_coord(status_base)
-                                _click_at(x, y, right=True, delay=0.1)
-                    if _stop_extras.is_set():
-                        break
-                    verificar_e_mover_itens_slots([0, 1, 2, 3])
-
-                if _stop_extras.is_set():
-                    break
-
-                if GOLD_BASE:
-                    _click_at(*scale_coord(GOLD_BASE), delay=0.5)
-
-            except Exception:
-                pass
-
+        run_extra(_status_cycle)
         _stop_extras.wait(POLL_STATUS)
 
 _tesouros_clicados: List[str] = []
@@ -568,6 +592,48 @@ def encontrar_tesouro_principal() -> Optional[tuple[int, int]]:
             return pos
     return None
 
+def _tesouro_cycle(imagens_tesouro: List[str]) -> None:
+    global _tesouros_clicados
+    try:
+        pos_tesouro = encontrar_tesouro_principal()
+
+        if pos_tesouro and not _stop_extras.is_set():
+            click_pos(pos_tesouro, 0.5)
+            encontrou = False
+
+            # Sempre reinicia em 0.9 primeiro; só cai pra 0.6 se não achar.
+            for confianca in (0.9, 0.6):
+                if encontrou or _stop_extras.is_set():
+                    break
+                for img_nome in imagens_tesouro:
+                    if _stop_extras.is_set():
+                        break
+                    if confianca == 0.9 and img_nome in _tesouros_clicados:
+                        continue
+
+                    img_path = os.path.join(GLOBAL_DIR, "suporte", "tesouro", img_nome)
+                    pos = _locate_raw(img_path, confidence=confianca)
+                    if not pos:
+                        continue
+
+                    encontrou = True
+                    click_pos(pos, 0.5)
+                    if confianca == 0.9:
+                        # achou com confiança alta -> não busca essa de novo (mais rápido)
+                        _tesouros_clicados.append(img_nome)
+                    # achou em 0.6 -> não entra na lista, continua elegível sempre
+
+                    if _stop_extras.is_set():
+                        break
+                    time.sleep(0.5)
+                    verificar_e_mover_itens()
+                    break
+
+            if not encontrou and not _stop_extras.is_set():
+                click_centro_tela()
+    except Exception:
+        pass
+
 def monitorar_tesouro() -> None:
     global _tesouros_clicados
     _tesouros_clicados = []
@@ -576,47 +642,7 @@ def monitorar_tesouro() -> None:
         return
 
     while not _stop_extras.is_set():
-        with _extras_lock:
-            try:
-                pos_tesouro = encontrar_tesouro_principal()
-
-                if pos_tesouro and not _stop_extras.is_set():
-                    click_pos(pos_tesouro, 0.5)
-                    encontrou = False
-
-                    # Sempre reinicia em 0.9 primeiro; só cai pra 0.6 se não achar.
-                    for confianca in (0.9, 0.6):
-                        if encontrou or _stop_extras.is_set():
-                            break
-                        for img_nome in imagens_tesouro:
-                            if _stop_extras.is_set():
-                                break
-                            if confianca == 0.9 and img_nome in _tesouros_clicados:
-                                continue
-
-                            img_path = os.path.join(GLOBAL_DIR, "suporte", "tesouro", img_nome)
-                            pos = _locate_raw(img_path, confidence=confianca)
-                            if not pos:
-                                continue
-
-                            encontrou = True
-                            click_pos(pos, 0.5)
-                            if confianca == 0.9:
-                                # achou com confiança alta -> não busca essa de novo (mais rápido)
-                                _tesouros_clicados.append(img_nome)
-                            # achou em 0.6 -> não entra na lista, continua elegível sempre
-
-                            if _stop_extras.is_set():
-                                break
-                            time.sleep(0.5)
-                            verificar_e_mover_itens()
-                            break
-
-                    if not encontrou and not _stop_extras.is_set():
-                        click_centro_tela()
-            except Exception:
-                pass
-
+        run_extra(_tesouro_cycle, imagens_tesouro)
         _stop_extras.wait(POLL_TESOURO)
 
 def disable_xp() -> None:
@@ -733,14 +759,17 @@ def monitor_match() -> None:
 
 CENTRO_DELAY = 5.0
 
-def centralizar_camera() -> None:
-    """CENTRO ligado: dá F3 (centraliza câmera no herói) uns segundos depois
-    da partida começar."""
-    time.sleep(CENTRO_DELAY)
+def _pressionar_f3() -> None:
     try:
         pyautogui.press("f3")
     except Exception:
         pass
+
+def centralizar_camera() -> None:
+    """CENTRO ligado: dá F3 (centraliza câmera no herói) uns segundos depois
+    da partida começar."""
+    time.sleep(CENTRO_DELAY)
+    run_extra(_pressionar_f3)
 
 def iniciar_partida():
     _stop_extras.clear()
@@ -748,7 +777,7 @@ def iniciar_partida():
     disable_xp()
 
     if SUPORTE:
-        subir_status()
+        run_extra(subir_status)
         verificar_e_mover_itens()
 
     threading.Thread(target=buscar_evento, daemon=True).start()

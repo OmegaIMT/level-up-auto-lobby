@@ -1,8 +1,11 @@
-aceitar.png=964,508
-fim.png=960,763
+image.png=1127,30
 lista.png=884,84
+sair.png=1698,960
 lobby.png=918,834
 ok.png=1004,604
-buscar.png=469,832
+buscar.png=400,832
 200.png=376,164
 att.png=1583,167
+game.png=392,245
+aceitar.png=958,509
+fim.png=959,765
