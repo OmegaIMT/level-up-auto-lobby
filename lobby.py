@@ -432,12 +432,12 @@ def step_up_name() -> None:
         return
 
     safe_click(buscar, pause=0.3)
-    time.sleep(0.2)
+    time.sleep(0.4)
 
     pyautogui.hotkey("ctrl", "a")
     time.sleep(0.05)
     pyautogui.press("delete")
-    time.sleep(0.2)
+    time.sleep(0.5)
 
     pyautogui.write(UP_PREFIX, interval=0.07)
     time.sleep(0.3)
@@ -481,6 +481,7 @@ def step_password() -> None:
     pyautogui.write(current_password(), interval=0.05)
     time.sleep(0.2)
     safe_click(ok_pos)
+    time.sleep(0.3)
 
 
 def _launch_in_game() -> None:
@@ -514,27 +515,6 @@ def _restart_with_current_password() -> None:
 # ==================================================
 # PÓS-CLIQUE EM LOBBY
 # ==================================================
-_ROOM_RESULT_SALA = "sala"
-_ROOM_RESULT_ACEITAR = "aceitar"
-_ROOM_RESULT_ERRO = "erro"
-_ROOM_RESULT_NADA = "nada"
-
-ROOM_CLICK_TIMEOUT = 8  # clique em game.png deve reagir rápido (erro/aceitar/sala) - se nada aparecer, volta pro ATT em vez de esperar 600s
-
-
-def _wait_after_room_click(timeout: float = ROOM_CLICK_TIMEOUT) -> str:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if locate("erro.png"):
-            return _ROOM_RESULT_ERRO
-        if locate("aceitar.png"):
-            return _ROOM_RESULT_ACEITAR
-        if locate("sala.png"):
-            return _ROOM_RESULT_SALA
-        time.sleep(POLL_FAST)
-    return _ROOM_RESULT_NADA
-
-
 def _accept_loop() -> bool:
     while True:
         err = locate("erro.png")
@@ -623,11 +603,6 @@ def step_lobby() -> None:
                 inside_room = False
                 continue
 
-            if not locate("sala.png"):
-                inside_room = False
-                time.sleep(POLL_FAST)
-                continue
-
             if time.time() - room_enter_time > SALA_TIMEOUT:
                 _restart_with_current_password()
                 inside_room = False
@@ -668,27 +643,8 @@ def step_lobby() -> None:
         time.sleep(CLICK_PAUSE)
         pyautogui.click()
 
-        result = _wait_after_room_click()
-
-        if result == _ROOM_RESULT_ERRO:
-            safe_click(locate("erro.png"), pause=0.1)
-            _restart_with_current_password()
-
-        elif result == _ROOM_RESULT_SALA:
-            inside_room = True
-            room_enter_time = time.time()
-
-        elif result == _ROOM_RESULT_ACEITAR:
-            aceitar = locate("aceitar.png")
-            if aceitar:
-                safe_click(aceitar)
-                completed = _accept_loop()
-                if completed:
-                    return
-                _restart_with_current_password()
-
-        elif result == _ROOM_RESULT_NADA:
-            continue  # clique não entrou em lugar nenhum - volta pro fluxo de ATT
+        inside_room = True
+        room_enter_time = time.time()
 
 
 # ==================================================
