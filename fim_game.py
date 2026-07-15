@@ -429,18 +429,23 @@ CONFIRM_BUTTON_DIR = os.path.join("language", "global", RESOLUTION, "buttons")
 CONFIRM_SHOP_MAX_TENTATIVAS = 5
 CONFIRM_SHOP_TIMEOUT = 4.0
 
-def _abrir_loja_com_confirmacao(coords: dict, botao_key: str, cache_key: str, img_name: str) -> bool:
+def _abrir_loja_com_confirmacao(coords: dict, botao_key: str, cache_key: str, img_names) -> bool:
     """Clica botao_key (abre a loja) e espera a confirmação visual
-    (forja.png/pena.png) aparecer; se não aparecer dentro do timeout, clica
-    de novo - até CONFIRM_SHOP_MAX_TENTATIVAS vezes. Coordenada da
-    confirmação fica cacheada automaticamente pelo locate() (mesmo cache de
-    coords/{RES}_fim_game.txt), pra achar mais rápido da próxima vez."""
+    (forja.png/forja_1.png/pena.png) aparecer; se não aparecer dentro do
+    timeout, clica de novo - até CONFIRM_SHOP_MAX_TENTATIVAS vezes.
+    img_names aceita uma string ou lista - forja tem variação (forja.png ou
+    forja_1.png), então checa as duas. Cada imagem tem cache_key próprio
+    (coords/{RES}_fim_game.txt), pra achar mais rápido da próxima vez."""
+    if isinstance(img_names, str):
+        img_names = [img_names]
     for _ in range(CONFIRM_SHOP_MAX_TENTATIVAS):
         _clicar_vender(coords, botao_key, 3.0)
         started = time.time()
         while time.time() - started < CONFIRM_SHOP_TIMEOUT:
-            if locate(cache_key, img_name, confidence=0.75, base_dir=CONFIRM_BUTTON_DIR):
-                return True
+            for img_name in img_names:
+                img_cache_key = f"{cache_key}_{os.path.splitext(img_name)[0]}"
+                if locate(img_cache_key, img_name, confidence=0.75, base_dir=CONFIRM_BUTTON_DIR):
+                    return True
             time.sleep(0.5)
     return False
 
@@ -455,17 +460,17 @@ def vender_wings() -> None:
     if not ranks or not WINGS_COORDS:
         return
     c = WINGS_COORDS
-    if not _abrir_loja_com_confirmacao(c, "wing_shop", "pena_confirm", "pena.png"):
+    if not _abrir_loja_com_confirmacao(c, "wing_shop", "pena_confirm", ["pena.png", "wings.png"]):
         return
-    _clicar_vender(c, "wings")
-    _clicar_vender(c, "buy")
+    _clicar_vender(c, "wings", 0.5)
+    _clicar_vender(c, "buy", 0.5)
     for rank in ranks:
         _clicar_vender(c, f"wing_{rank}")
-    _clicar_vender(c, "buy_2")
+    _clicar_vender(c, "buy_2", 0.5)
     _clicar_vender(c, "confirm", 0.8)
     _clicar_vender(c, "ok", 0.8)
-    _clicar_vender(c, "closer")
-    _clicar_vender(c, "closer")   
+    _clicar_vender(c, "closer", 0.5)
+    _clicar_vender(c, "closer", 0.5)   
     _clicar_vender(c, "wing_shop")
 
 def vender_equipamento() -> None:
@@ -474,14 +479,14 @@ def vender_equipamento() -> None:
     if not ranks or not EQUIP_COORDS:
         return
     c = EQUIP_COORDS
-    if not _abrir_loja_com_confirmacao(c, "equip_forge", "forja_confirm", "forja.png"):
+    if not _abrir_loja_com_confirmacao(c, "equip_forge", "forja_confirm", ["forja.png", "forja_1.png"]):
         return
-    _clicar_vender(c, "upgrade")
+    _clicar_vender(c, "upgrade", 0.5)
     for rank in ranks:
         _clicar_vender(c, f"equip_{rank}")
     _clicar_vender(c, "confirm", 3.0)
-    _clicar_vender(c, "closer")
-    _clicar_vender(c, "closer")    
+    _clicar_vender(c, "closer", 0.5)
+    _clicar_vender(c, "closer", 0.5)    
     _clicar_vender(c, "equip_forge")
 
 def _aguardar_endless_e_clicar(timeout: float = 60) -> bool:
