@@ -1,2 +1,2 @@
-fonte=1124,63
 shop_global=1234,1014
+fonte=1123,64

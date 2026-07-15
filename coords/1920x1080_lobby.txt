@@ -1,10 +1,9 @@
-image.png=1127,30
-lista.png=884,84
-sair.png=1698,960
 lobby.png=918,834
 ok.png=1004,604
-buscar.png=400,832
-200.png=376,164
+buscar.png=469,832
+image.png=1126,30
+lista.png=884,84
+200.png=376,165
 att.png=1583,167
 game.png=392,245
 aceitar.png=958,509

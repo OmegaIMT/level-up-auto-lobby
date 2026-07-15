@@ -467,8 +467,8 @@ def vender_wings() -> None:
     for rank in ranks:
         _clicar_vender(c, f"wing_{rank}")
     _clicar_vender(c, "buy_2", 0.5)
-    _clicar_vender(c, "confirm", 0.8)
-    _clicar_vender(c, "ok", 0.8)
+    _clicar_vender(c, "confirm", 1.2)
+    _clicar_vender(c, "ok", 1.2)
     _clicar_vender(c, "closer", 0.5)
     _clicar_vender(c, "closer", 0.5)   
     _clicar_vender(c, "wing_shop")

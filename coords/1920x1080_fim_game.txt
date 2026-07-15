@@ -1,7 +1,8 @@
 pena_confirm=979,922
 forja_confirm=1030,521
 pena_confirm_pena=979,922
-count=961,105
-dog_ingame=714,518
 forja_confirm_forja=1030,521
-endless_ingame=1258,750
+count=961,105
+dog_ingame=758,310
+endless_ingame=1039,882
+fonte=1124,63
