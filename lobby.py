@@ -46,6 +46,7 @@ ATT_CYCLE_WAIT_NO_CACHE = 0.4  # espera maior quando game.png ainda não tem coo
 MENU_STEP_WAIT = 0.25  # pausa entre cliques no menu (reduzida pela metade)
 SAIR_TIMEOUT = 1.5  # timeout do popup opcional "sair" (reduzido pela metade)
 SALA_TIMEOUT = 170  # sala.png travada (sem erro/aceitar) por mais que isso reinicia o dota
+FIM_TIMEOUT = 240  # fim.png não aparece (aceitar travado) por mais que isso reinicia o dota
 
 # ==================================================
 # SESSION CONFIG (gerado pelo start.py)
@@ -516,6 +517,7 @@ def _restart_with_current_password() -> None:
 # PÓS-CLIQUE EM LOBBY
 # ==================================================
 def _accept_loop() -> bool:
+    start = time.time()
     while True:
         err = locate("erro.png")
         if err:
@@ -528,6 +530,9 @@ def _accept_loop() -> bool:
             return True
 
         if locate("sala.png"):
+            return False
+
+        if time.time() - start > FIM_TIMEOUT:
             return False
 
         time.sleep(POLL_FAST)

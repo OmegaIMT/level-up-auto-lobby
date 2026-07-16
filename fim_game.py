@@ -10,8 +10,9 @@ from typing import Optional
 
 if sys.platform == "win32":
     import ctypes
+
     kernel32 = ctypes.WinDLL("kernel32")
-    user32   = ctypes.WinDLL("user32")
+    user32 = ctypes.WinDLL("user32")
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PER_MONITOR_AWARE
     except Exception:
@@ -21,10 +22,11 @@ if sys.platform == "win32":
         user32.ShowWindow(hWnd, 0)
 
 HIDDEN_WINDOW = subprocess.STARTUPINFO()
-HIDDEN_WINDOW.dwFlags     |= subprocess.STARTF_USESHOWWINDOW
-HIDDEN_WINDOW.wShowWindow  = 0
+HIDDEN_WINDOW.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+HIDDEN_WINDOW.wShowWindow = 0
 
 CONFIG_FILE = "config.json"
+
 
 def load_config() -> dict:
     if not os.path.exists(CONFIG_FILE):
@@ -35,7 +37,9 @@ def load_config() -> dict:
     except Exception:
         return {}
 
+
 CONFIG = load_config()
+
 
 def save_config_update(**kwargs) -> None:
     cfg = load_config()
@@ -46,7 +50,8 @@ def save_config_update(**kwargs) -> None:
     except Exception:
         pass
 
-LANGUAGE   = CONFIG.get("language", "pt-br")
+
+LANGUAGE = CONFIG.get("language", "pt-br")
 RESOLUTION = CONFIG.get("resolution", "1920x1080")
 
 # IMG_DIR: bonus.png ("I am the champion"), dependente de idioma.
@@ -55,8 +60,8 @@ IMG_DIR = os.path.join("language", LANGUAGE, RESOLUTION, "in_game")
 # GLOBAL_DIR: fonte.png (início da próxima partida), independente de idioma.
 GLOBAL_DIR = os.path.join("language", "global", RESOLUTION)
 
-REHOST_MAX          = int(CONFIG.get("rehost_max", 5))
-CICLOS_FEITOS       = int(CONFIG.get("ciclos", 0))
+REHOST_MAX = int(CONFIG.get("rehost_max", 5))
+CICLOS_FEITOS = int(CONFIG.get("ciclos", 0))
 PARTIDAS_CONCLUIDAS = int(CONFIG.get("partidas_concluidas", 0))
 
 # coords/: mesmo esquema do in_game.py — cache de coordenadas próprio,
@@ -68,7 +73,9 @@ try:
     _RES_WIDTH = int(RESOLUTION.lower().split("x")[0])
 except Exception:
     _RES_WIDTH = 1920
-CACHE_MARGIN = max(60, round(60 * _RES_WIDTH / 1920))  # escala com a resolução (ver lobby.py)
+CACHE_MARGIN = max(
+    60, round(60 * _RES_WIDTH / 1920)
+)  # escala com a resolução (ver lobby.py)
 
 # ==================================================
 # VENDER (wings/equipamento) - coordenadas fixas capturadas via
@@ -77,6 +84,7 @@ CACHE_MARGIN = max(60, round(60 * _RES_WIDTH / 1920))  # escala com a resoluçã
 RANKS_ORDER = ["b", "a", "s", "ss", "sss", "ex"]
 
 VENDER_COORDS_FILE = os.path.join(COORDS_DIR, "coords_base_vender.json")
+
 
 def load_vender_coords() -> dict:
     if not os.path.exists(VENDER_COORDS_FILE):
@@ -87,8 +95,11 @@ def load_vender_coords() -> dict:
     except Exception:
         return {}
 
+
 VENDER_COORDS_ALL = load_vender_coords()
-VENDER_COORDS = VENDER_COORDS_ALL.get(RESOLUTION.lower()) or VENDER_COORDS_ALL.get(RESOLUTION) or {}
+VENDER_COORDS = (
+    VENDER_COORDS_ALL.get(RESOLUTION.lower()) or VENDER_COORDS_ALL.get(RESOLUTION) or {}
+)
 WINGS_COORDS = VENDER_COORDS.get("wings", {})
 EQUIP_COORDS = VENDER_COORDS.get("equipamento", {})
 HERO_COORDS = VENDER_COORDS.get("hero", {})
@@ -97,6 +108,7 @@ HERO_COORDS = VENDER_COORDS.get("hero", {})
 # longe de um slot de item, evita hover/tooltip atrapalhar) - só reaproveita
 # o arquivo de coords do in_game aqui, sem puxar o módulo inteiro.
 IN_GAME_COORDS_FILE = os.path.join(COORDS_DIR, "coords_base_in_game.json")
+
 
 def _load_json(path: str) -> dict:
     if not os.path.exists(path):
@@ -107,8 +119,13 @@ def _load_json(path: str) -> dict:
     except Exception:
         return {}
 
+
 IN_GAME_COORDS_ALL = _load_json(IN_GAME_COORDS_FILE)
-IN_GAME_COORDS = IN_GAME_COORDS_ALL.get(RESOLUTION.lower()) or IN_GAME_COORDS_ALL.get(RESOLUTION) or {}
+IN_GAME_COORDS = (
+    IN_GAME_COORDS_ALL.get(RESOLUTION.lower())
+    or IN_GAME_COORDS_ALL.get(RESOLUTION)
+    or {}
+)
 SLOT_20 = IN_GAME_COORDS.get("slot_20")
 
 # {"b": bool, "a": bool, ...} - vem do painel "Vender" do start.py.
@@ -130,14 +147,15 @@ DOG_CLICK_Y_RATIO = 2.3
 # Tempo (s) esperando fonte.png aparecer após count sumir (fim de partida
 # concluída, ainda não bateu rehost_max). Se estourar, mesmo fluxo dos
 # outros timeouts: fecha dota, chama lobby de novo.
-TIMEOUT_SEM_FONTE = 1800
+TIMEOUT_SEM_FONTE = 600
 
-pyautogui.PAUSE    = 0.1
+pyautogui.PAUSE = 0.1
 pyautogui.FAILSAFE = True
 
 _mouse_lock = threading.RLock()
 
 STATUS_FILE = "status.json"
+
 
 def save_status(partidas: int, rehost_max: int, ciclos: int) -> None:
     payload = {"partidas": partidas, "rehost_max": rehost_max, "ciclos": ciclos}
@@ -147,17 +165,22 @@ def save_status(partidas: int, rehost_max: int, ciclos: int) -> None:
     except Exception:
         pass
 
+
 # Debug ao vivo (painel.py): qual imagem locate() buscou por último e se achou.
 _debug_lock = threading.Lock()
 _last_debug: tuple[str, bool] | None = None
 _last_debug_time = 0.0
 DEBUG_MIN_INTERVAL = 0.15
 
+
 def _update_debug(name: str, found: bool) -> None:
     global _last_debug, _last_debug_time
     now = time.time()
     with _debug_lock:
-        if _last_debug == (name, found) and (now - _last_debug_time) < DEBUG_MIN_INTERVAL:
+        if (
+            _last_debug == (name, found)
+            and (now - _last_debug_time) < DEBUG_MIN_INTERVAL
+        ):
             return
         _last_debug = (name, found)
         _last_debug_time = now
@@ -175,6 +198,7 @@ def _update_debug(name: str, found: bool) -> None:
     except Exception:
         pass
 
+
 def _matar_irmaos() -> None:
     """
     Esc em qualquer um dos quatro (lobby/in_game/fim_game/painel) derruba
@@ -184,16 +208,28 @@ def _matar_irmaos() -> None:
     """
     if sys.platform != "win32":
         return
-    exe_proprio = os.path.basename(sys.executable).lower() if getattr(sys, "frozen", False) else None
-    alvos = [t for t in ("lobby.exe", "in_game.exe", "fim_game.exe", "painel.exe") if t != exe_proprio]
+    exe_proprio = (
+        os.path.basename(sys.executable).lower()
+        if getattr(sys, "frozen", False)
+        else None
+    )
+    alvos = [
+        t
+        for t in ("lobby.exe", "in_game.exe", "fim_game.exe", "painel.exe")
+        if t != exe_proprio
+    ]
 
     if alvos:
         try:
             args = ["taskkill", "/F"]
             for t in alvos:
                 args += ["/IM", t]
-            subprocess.Popen(args, startupinfo=HIDDEN_WINDOW,
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(
+                args,
+                startupinfo=HIDDEN_WINDOW,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         except Exception:
             pass
     ps_script = (
@@ -202,11 +238,15 @@ def _matar_irmaos() -> None:
         "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
     )
     try:
-        subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-                          startupinfo=HIDDEN_WINDOW,
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+            startupinfo=HIDDEN_WINDOW,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     except Exception:
         pass
+
 
 def _watch_esc() -> None:
     """
@@ -220,8 +260,10 @@ def _watch_esc() -> None:
     _matar_irmaos()
     os._exit(1)
 
+
 _coord_cache: dict[str, tuple[int, int]] = {}
 _cache_lock = threading.Lock()
+
 
 def _cache_load() -> None:
     _coord_cache.clear()
@@ -239,6 +281,7 @@ def _cache_load() -> None:
     except Exception:
         pass
 
+
 def _cache_write() -> None:
     tmp_file = CACHE_FILE + ".tmp"
     try:
@@ -251,10 +294,12 @@ def _cache_write() -> None:
     except Exception:
         pass
 
+
 def _cache_save_entry(name: str, x: int, y: int) -> None:
     with _cache_lock:
         _coord_cache[name] = (x, y)
         _cache_write()
+
 
 def _cache_invalidate(name: str) -> None:
     with _cache_lock:
@@ -262,19 +307,29 @@ def _cache_invalidate(name: str) -> None:
             del _coord_cache[name]
             _cache_write()
 
+
 Region = tuple[int, int, int, int]
+
 
 def _global_img(*parts: str) -> str:
     """Caminho dentro de GLOBAL_DIR (independente de idioma, só por resolução)."""
     return os.path.join(GLOBAL_DIR, *parts)
 
-def _locate_raw(path: str, confidence: float, region: Optional[Region] = None) -> Optional[tuple[int, int]]:
+
+def _locate_raw(
+    path: str, confidence: float, region: Optional[Region] = None
+) -> Optional[tuple[int, int]]:
     try:
-        return pyautogui.locateCenterOnScreen(path, confidence=confidence, region=region)
+        return pyautogui.locateCenterOnScreen(
+            path, confidence=confidence, region=region
+        )
     except Exception:
         return None
 
-def locate(cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir: str = IMG_DIR) -> Optional[tuple[int, int]]:
+
+def locate(
+    cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir: str = IMG_DIR
+) -> Optional[tuple[int, int]]:
     full_path = os.path.join(base_dir, *path_parts)
     if not os.path.exists(full_path):
         return None
@@ -282,7 +337,12 @@ def locate(cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir:
     cached = _coord_cache.get(cache_key)
     if cached is not None:
         cx, cy = cached
-        region: Region = (max(0, cx - CACHE_MARGIN), max(0, cy - CACHE_MARGIN), CACHE_MARGIN * 2, CACHE_MARGIN * 2)
+        region: Region = (
+            max(0, cx - CACHE_MARGIN),
+            max(0, cy - CACHE_MARGIN),
+            CACHE_MARGIN * 2,
+            CACHE_MARGIN * 2,
+        )
         pos = _locate_raw(full_path, confidence, region=region)
         if pos:
             _update_debug(cache_key, True)
@@ -295,13 +355,17 @@ def locate(cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir:
         _cache_save_entry(cache_key, pos[0], pos[1])
     return pos
 
+
 def _locate_box_raw(path: str, confidence: float, region: Optional[Region] = None):
     try:
         return pyautogui.locateOnScreen(path, confidence=confidence, region=region)
     except Exception:
         return None
 
-def locate_box(cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir: str = IMG_DIR):
+
+def locate_box(
+    cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir: str = IMG_DIR
+):
     """Igual locate(), mas devolve a caixa (left, top, width, height) em vez
     do centro - usado quando o clique real não é no centro do template e
     precisa escalar com o tamanho encontrado (ex: dog.png, ver
@@ -313,7 +377,12 @@ def locate_box(cache_key: str, *path_parts: str, confidence: float = 0.75, base_
     cached = _coord_cache.get(cache_key)
     if cached is not None:
         cx, cy = cached
-        region: Region = (max(0, cx - CACHE_MARGIN), max(0, cy - CACHE_MARGIN), CACHE_MARGIN * 2, CACHE_MARGIN * 2)
+        region: Region = (
+            max(0, cx - CACHE_MARGIN),
+            max(0, cy - CACHE_MARGIN),
+            CACHE_MARGIN * 2,
+            CACHE_MARGIN * 2,
+        )
         box = _locate_box_raw(full_path, confidence, region=region)
         if box:
             _update_debug(cache_key, True)
@@ -323,8 +392,11 @@ def locate_box(cache_key: str, *path_parts: str, confidence: float = 0.75, base_
     box = _locate_box_raw(full_path, confidence)
     _update_debug(cache_key, box is not None)
     if box:
-        _cache_save_entry(cache_key, box.left + box.width // 2, box.top + box.height // 2)
+        _cache_save_entry(
+            cache_key, box.left + box.width // 2, box.top + box.height // 2
+        )
     return box
+
 
 def descansar_mouse() -> None:
     """Canto da tela, não o centro: os popups de fim de ciclo (fonte,
@@ -336,7 +408,15 @@ def descansar_mouse() -> None:
     except Exception:
         pass
 
-def _click_at(x: int, y: int, right: bool = False, delay: float = 0.1, rest: bool = True, pre_delay: float = 0.05) -> None:
+
+def _click_at(
+    x: int,
+    y: int,
+    right: bool = False,
+    delay: float = 0.1,
+    rest: bool = True,
+    pre_delay: float = 0.05,
+) -> None:
     """pre_delay: pausa entre mover o mouse e clicar - moveTo é instantâneo
     (sem duration), então em cliques mais sensíveis (ex: mapa do endless) o
     jogo às vezes ainda não processou a posição nova do cursor quando o
@@ -356,8 +436,15 @@ def _click_at(x: int, y: int, right: bool = False, delay: float = 0.1, rest: boo
     except Exception:
         pass
 
-def click_pos(pos: tuple[int, int], delay_after: float = 0.3, rest: bool = True, pre_delay: float = 0.05) -> None:
+
+def click_pos(
+    pos: tuple[int, int],
+    delay_after: float = 0.3,
+    rest: bool = True,
+    pre_delay: float = 0.05,
+) -> None:
     _click_at(pos[0], pos[1], delay=delay_after, rest=rest, pre_delay=pre_delay)
+
 
 def wait_for_match_start(poll: float = 2.0, timeout: Optional[float] = None) -> bool:
     started_at = time.time()
@@ -369,12 +456,14 @@ def wait_for_match_start(poll: float = 2.0, timeout: Optional[float] = None) -> 
             return False
         time.sleep(poll)
 
+
 POLL_BONUS = 3.0
 
 # Setado pelo _bonus_watcher sempre que clica bonus.png - os fluxos de venda
 # (vender_wings/vender_equipamento) checam isso pra saber se o popup atrapalhou
 # os cliques deles (fica por cima da tela) e precisam refazer o fluxo do zero.
 _bonus_interrupt = threading.Event()
+
 
 def _bonus_watcher(wait_once: bool = False) -> None:
     """
@@ -401,7 +490,9 @@ def _bonus_watcher(wait_once: bool = False) -> None:
             pass
         time.sleep(POLL_BONUS)
 
+
 BONUS_INTERRUPT_MAX_RETRY = 5
+
 
 def _rodar_com_retry_bonus(fluxo) -> None:
     """Se bonus.png aparecer (e for clicado pelo _bonus_watcher) enquanto
@@ -414,11 +505,15 @@ def _rodar_com_retry_bonus(fluxo) -> None:
         if not _bonus_interrupt.is_set():
             return
 
-def _clicar_vender(coords: dict, chave: str, espera: float = 0.3, pre_delay: float = 0.05) -> None:
+
+def _clicar_vender(
+    coords: dict, chave: str, espera: float = 0.3, pre_delay: float = 0.05
+) -> None:
     pos = coords.get(chave)
     if not pos:
         return
     click_pos(tuple(pos), delay_after=espera, rest=False, pre_delay=pre_delay)
+
 
 # Confirmação visual (forja.png/pena.png) de que a loja realmente abriu
 # depois do clique no botão - imagens fixas (idioma-independente), mas
@@ -429,7 +524,10 @@ CONFIRM_BUTTON_DIR = os.path.join("language", "global", RESOLUTION, "buttons")
 CONFIRM_SHOP_MAX_TENTATIVAS = 5
 CONFIRM_SHOP_TIMEOUT = 4.0
 
-def _abrir_loja_com_confirmacao(coords: dict, botao_key: str, cache_key: str, img_names) -> bool:
+
+def _abrir_loja_com_confirmacao(
+    coords: dict, botao_key: str, cache_key: str, img_names
+) -> bool:
     """Clica botao_key (abre a loja) e espera a confirmação visual
     (forja.png/forja_1.png/pena.png) aparecer; se não aparecer dentro do
     timeout, clica de novo - até CONFIRM_SHOP_MAX_TENTATIVAS vezes.
@@ -444,10 +542,16 @@ def _abrir_loja_com_confirmacao(coords: dict, botao_key: str, cache_key: str, im
         while time.time() - started < CONFIRM_SHOP_TIMEOUT:
             for img_name in img_names:
                 img_cache_key = f"{cache_key}_{os.path.splitext(img_name)[0]}"
-                if locate(img_cache_key, img_name, confidence=0.75, base_dir=CONFIRM_BUTTON_DIR):
+                if locate(
+                    img_cache_key,
+                    img_name,
+                    confidence=0.75,
+                    base_dir=CONFIRM_BUTTON_DIR,
+                ):
                     return True
             time.sleep(0.5)
     return False
+
 
 def vender_wings() -> None:
     """
@@ -460,7 +564,9 @@ def vender_wings() -> None:
     if not ranks or not WINGS_COORDS:
         return
     c = WINGS_COORDS
-    if not _abrir_loja_com_confirmacao(c, "wing_shop", "pena_confirm", ["pena.png", "wings.png"]):
+    if not _abrir_loja_com_confirmacao(
+        c, "wing_shop", "pena_confirm", ["pena.png", "wings.png"]
+    ):
         return
     _clicar_vender(c, "wings", 0.5)
     _clicar_vender(c, "buy", 0.5)
@@ -470,8 +576,9 @@ def vender_wings() -> None:
     _clicar_vender(c, "confirm", 1.2)
     _clicar_vender(c, "ok", 1.2)
     _clicar_vender(c, "closer", 0.5)
-    _clicar_vender(c, "closer", 0.5)   
+    _clicar_vender(c, "closer", 0.5)
     _clicar_vender(c, "wing_shop")
+
 
 def vender_equipamento() -> None:
     """Mesma lógica do vender_wings, fluxo de Equipamento (forja/upgrade)."""
@@ -479,15 +586,18 @@ def vender_equipamento() -> None:
     if not ranks or not EQUIP_COORDS:
         return
     c = EQUIP_COORDS
-    if not _abrir_loja_com_confirmacao(c, "equip_forge", "forja_confirm", ["forja.png", "forja_1.png"]):
+    if not _abrir_loja_com_confirmacao(
+        c, "equip_forge", "forja_confirm", ["forja.png", "forja_1.png"]
+    ):
         return
     _clicar_vender(c, "upgrade", 0.5)
     for rank in ranks:
         _clicar_vender(c, f"equip_{rank}")
     _clicar_vender(c, "confirm", 3.0)
     _clicar_vender(c, "closer", 0.5)
-    _clicar_vender(c, "closer", 0.5)    
+    _clicar_vender(c, "closer", 0.5)
     _clicar_vender(c, "equip_forge")
+
 
 def _aguardar_endless_e_clicar(timeout: float = 60) -> bool:
     """Espera language/pt-br/.../in_game/endless.png aparecer e clica (usado
@@ -502,7 +612,9 @@ def _aguardar_endless_e_clicar(timeout: float = 60) -> bool:
             return False
         time.sleep(0.5)
 
+
 ENDLESS_MAX_TENTATIVAS = 5
+
 
 def _dog_templates() -> list[str]:
     """dog.png, dog_1.png, dog_2.png... - o texto do label não muda, mas a
@@ -510,6 +622,7 @@ def _dog_templates() -> list[str]:
     template só não bate sempre. Lista tudo que existir, na ordem."""
     paths = sorted(glob.glob(os.path.join(IMG_DIR, "dog*.png")))
     return [os.path.basename(p) for p in paths]
+
 
 def _aguardar_dog_e_clicar(timeout: float = 3) -> bool:
     """Espera algum dog*.png (só o texto do label do Endless Trial no mapa)
@@ -522,12 +635,16 @@ def _aguardar_dog_e_clicar(timeout: float = 3) -> bool:
         for name in _dog_templates():
             box = locate_box("dog_ingame", name, confidence=0.75)
             if box:
-                target = (box.left + box.width // 2, box.top + int(box.height * DOG_CLICK_Y_RATIO))
+                target = (
+                    box.left + box.width // 2,
+                    box.top + int(box.height * DOG_CLICK_Y_RATIO),
+                )
                 click_pos(target, delay_after=ENDLESS_CLICK_DELAY, rest=False)
                 return True
         if time.time() - started > timeout:
             return False
         time.sleep(0.5)
+
 
 def ativar_endless() -> None:
     """3° fluxo (depois de equipamento/wings): entra no mapa Endless Trial -
@@ -559,6 +676,7 @@ def ativar_endless() -> None:
         pass
     _aguardar_endless_e_clicar()
 
+
 def aguardar_count_reaparecer(timeout: float = 60) -> bool:
     """Sincroniza a troca entre wings->equipamento: espera a tela voltar
     pro normal (count.png visível de novo) antes de abrir o próximo fluxo."""
@@ -569,6 +687,7 @@ def aguardar_count_reaparecer(timeout: float = 60) -> bool:
         if time.time() - started > timeout:
             return False
         time.sleep(0.5)
+
 
 def disconnect_and_relaunch() -> None:
     """Fecha o dota e volta pro lobby (fim do ciclo, ou algo travou)."""
@@ -581,8 +700,11 @@ def disconnect_and_relaunch() -> None:
     if os.path.exists("lobby.exe"):
         subprocess.Popen(["lobby.exe", CONFIG_FILE], startupinfo=HIDDEN_WINDOW)
     else:
-        subprocess.Popen([sys.executable, "lobby.py", CONFIG_FILE], startupinfo=HIDDEN_WINDOW)
+        subprocess.Popen(
+            [sys.executable, "lobby.py", CONFIG_FILE], startupinfo=HIDDEN_WINDOW
+        )
     os._exit(0)
+
 
 def _launch_in_game() -> None:
     """Puxa o in_game de novo pra próxima partida do mesmo ciclo."""
@@ -591,6 +713,7 @@ def _launch_in_game() -> None:
     elif os.path.exists("in_game.py"):
         subprocess.Popen([sys.executable, "in_game.py"], startupinfo=HIDDEN_WINDOW)
     os._exit(0)
+
 
 def processar_fim_partida() -> None:
     global PARTIDAS_CONCLUIDAS, CICLOS_FEITOS
@@ -647,6 +770,7 @@ def processar_fim_partida() -> None:
         return
 
     _launch_in_game()
+
 
 if __name__ == "__main__":
     threading.Thread(target=_watch_esc, daemon=True).start()
