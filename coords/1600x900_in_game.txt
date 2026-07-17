@@ -1,4 +1,4 @@
-fonte=937,50
 shop_global=1028,846
 pill=1028,849
+fonte=937,51
 count=798,87
