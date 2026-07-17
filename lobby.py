@@ -41,11 +41,12 @@ POLL_NORMAL = 0.03  # polling padrão do loop de lobby
 POLL_ATT = 0.05  # intervalo entre cliques no botão de atualizar
 CLICK_PAUSE = 0.03  # pausa antes de cada clique
 FOCUS_WAIT = 0.8  # tempo para o Windows processar foco
-ATT_CYCLE_WAIT = 0.15  # espera após cada clique em ATT antes de checar
+ATT_CYCLE_WAIT = 0.13  # espera após cada clique em ATT antes de checar
 ATT_CYCLE_WAIT_NO_CACHE = 0.4  # espera maior quando game.png ainda não tem coordenada em cache (dá tempo de ver a tela)
 MENU_STEP_WAIT = 0.25  # pausa entre cliques no menu (reduzida pela metade)
 SAIR_TIMEOUT = 1.5  # timeout do popup opcional "sair" (reduzido pela metade)
 SALA_TIMEOUT = 170  # sala.png travada (sem erro/aceitar) por mais que isso reinicia o dota
+FIM_TIMEOUT = 240  # fim.png não aparece (aceitar travado) por mais que isso reinicia o dota
 
 # ==================================================
 # SESSION CONFIG (gerado pelo start.py)
@@ -67,7 +68,7 @@ def _load_session_config() -> dict:
             print(f"Erro ao ler {SESSION_CONFIG_FILE}: {e}")
 
     return {
-        "passwords": "4433",
+        "passwords": "",
         "language": "pt-br",
     }
 
@@ -432,12 +433,12 @@ def step_up_name() -> None:
         return
 
     safe_click(buscar, pause=0.3)
-    time.sleep(0.2)
+    time.sleep(0.4)
 
     pyautogui.hotkey("ctrl", "a")
     time.sleep(0.05)
     pyautogui.press("delete")
-    time.sleep(0.2)
+    time.sleep(0.5)
 
     pyautogui.write(UP_PREFIX, interval=0.07)
     time.sleep(0.3)
@@ -481,6 +482,7 @@ def step_password() -> None:
     pyautogui.write(current_password(), interval=0.05)
     time.sleep(0.2)
     safe_click(ok_pos)
+    time.sleep(0.3)
 
 
 def _launch_in_game() -> None:
@@ -514,25 +516,8 @@ def _restart_with_current_password() -> None:
 # ==================================================
 # PÓS-CLIQUE EM LOBBY
 # ==================================================
-_ROOM_RESULT_SALA = "sala"
-_ROOM_RESULT_ACEITAR = "aceitar"
-_ROOM_RESULT_ERRO = "erro"
-
-
-def _wait_after_room_click(timeout: float = 600) -> str:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if locate("erro.png"):
-            return _ROOM_RESULT_ERRO
-        if locate("aceitar.png"):
-            return _ROOM_RESULT_ACEITAR
-        if locate("sala.png"):
-            return _ROOM_RESULT_SALA
-        time.sleep(POLL_FAST)
-    return _ROOM_RESULT_ERRO
-
-
 def _accept_loop() -> bool:
+    start = time.time()
     while True:
         err = locate("erro.png")
         if err:
@@ -547,21 +532,21 @@ def _accept_loop() -> bool:
         if locate("sala.png"):
             return False
 
+        if time.time() - start > FIM_TIMEOUT:
+            return False
+
         time.sleep(POLL_FAST)
 
 
 # ==================================================
 # LOOP DE ATT INTELIGENTE
 # ==================================================
-def _refresh_until_game_appears() -> Optional[tuple[int, int]]:
+def _refresh_until_game_appears(max_attempts: int = 60) -> Optional[tuple[int, int]]:
     """
-    Clica em ATT continuamente em paralelo enquanto monitora se game.png aparece.
-    Também monitora se full.png aparece; caso apareça, clica para fechar e continua.
-
-    Retorna a posição de game.png já capturada pelo observer no instante em
-    que achou - quem chama NÃO deve re-buscar (re-locate depois de parar as
-    threads corre risco de a lista já ter rolado/mudado e a imagem sumir,
-    fazendo o fluxo cair de novo no clique em ATT e perder a sala).
+    Clica em ATT e confere se game.png aparece, sequencial - sem thread
+    paralela. O par clicker/observer em threads separadas brigava pelo mouse
+    (_mouse_lock) e pela mesma imagem ao mesmo tempo, e a corrida entre as
+    duas fazia perder sala.png. Loop simples: clica, espera, confere.
     """
     att = locate("att.png")
     if not att:
@@ -569,47 +554,24 @@ def _refresh_until_game_appears() -> Optional[tuple[int, int]]:
 
     save_status(current_pw=current_password(), password_deadline=0.0)
 
-    found_event = threading.Event()
-    stop_event = threading.Event()
-    found_pos: list[Optional[tuple[int, int]]] = [None]
+    for _ in range(max_attempts):
+        safe_click(att, pause=POLL_ATT)
+        wait_time = ATT_CYCLE_WAIT if "game.png" in _coord_cache else ATT_CYCLE_WAIT_NO_CACHE
+        time.sleep(wait_time)
 
-    def _clicker() -> None:
-        current_att = att
-        while not stop_event.is_set() and not found_event.is_set():
-            safe_click(current_att, pause=POLL_ATT)
-            wait_time = ATT_CYCLE_WAIT if "game.png" in _coord_cache else ATT_CYCLE_WAIT_NO_CACHE
-            if found_event.wait(timeout=wait_time):
-                return
-            current_att = locate("att.png") or current_att
+        pos = locate("game.png", confidence=0.7)
+        if pos:
+            return pos
 
-    def _observer() -> None:
-        while not stop_event.is_set():
-            # 1. Verifica se o jogo foi encontrado - clica na hora, sem re-buscar depois
-            pos = locate("game.png", confidence=0.7)
-            if pos:
-                found_pos[0] = pos
-                found_event.set()
-                return
+        # Se aparecer 'full.png' (sala cheia), clica pra fechar o aviso e segue.
+        full_pop = locate("full.png", confidence=0.70)
+        if full_pop:
+            safe_click(full_pop, pause=0.1)
+            time.sleep(0.2)
 
-            # 2. Nova verificação: Se aparecer 'full.png', clica nela para fechar o aviso
-            full_pop = locate("full.png", confidence=0.70)
-            if full_pop:
-                safe_click(full_pop, pause=0.1)
-                time.sleep(0.2)  # Pausa rápida para o Dota processar o fechamento do popup
+        att = locate("att.png") or att
 
-            time.sleep(POLL_FAST)
-
-    clicker_thread = threading.Thread(target=_clicker, daemon=True)
-    observer_thread = threading.Thread(target=_observer, daemon=True)
-    clicker_thread.start()
-    observer_thread.start()
-
-    found_event.wait()  # Aguarda sem timeout
-    stop_event.set()
-    clicker_thread.join(timeout=2)
-    observer_thread.join(timeout=2)
-
-    return found_pos[0]
+    return None
 
 # ==================================================
 # STEP LOBBY
@@ -646,11 +608,6 @@ def step_lobby() -> None:
                 inside_room = False
                 continue
 
-            if not locate("sala.png"):
-                inside_room = False
-                time.sleep(POLL_FAST)
-                continue
-
             if time.time() - room_enter_time > SALA_TIMEOUT:
                 _restart_with_current_password()
                 inside_room = False
@@ -681,29 +638,18 @@ def step_lobby() -> None:
             wait_for("200.png", timeout=30)
             continue
 
-        # Game encontrado → duplo-clique imediato na posição já capturada
+        # Game encontrado → dois cliques simples em sequência na posição já
+        # capturada. pyautogui.doubleClick() manda um evento de double-click
+        # de SO que o Dota às vezes não reconhece (mouse chega mas não entra
+        # na sala) - cliques separados replicam o que já funcionava.
         pyautogui.moveTo(game[0], game[1])
         time.sleep(CLICK_PAUSE)
-        pyautogui.doubleClick()
+        pyautogui.click()
+        time.sleep(CLICK_PAUSE)
+        pyautogui.click()
 
-        result = _wait_after_room_click()
-
-        if result == _ROOM_RESULT_ERRO:
-            safe_click(locate("erro.png"), pause=0.1)
-            _restart_with_current_password()
-
-        elif result == _ROOM_RESULT_SALA:
-            inside_room = True
-            room_enter_time = time.time()
-
-        elif result == _ROOM_RESULT_ACEITAR:
-            aceitar = locate("aceitar.png")
-            if aceitar:
-                safe_click(aceitar)
-                completed = _accept_loop()
-                if completed:
-                    return
-                _restart_with_current_password()
+        inside_room = True
+        room_enter_time = time.time()
 
 
 # ==================================================

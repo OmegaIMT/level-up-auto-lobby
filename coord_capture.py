@@ -61,9 +61,11 @@ RESOLUTION = CONFIG.get("resolution", "1920x1080")
 # mesma chave.
 SECTIONS: list[tuple[str, list[str]]] = [
     ("wings", ["wing_shop", "wings", "buy", "wing_b", "wing_a", "wing_s",
-               "wing_ss", "wing_sss", "wing_ex", "buy_2", "confirm", "ok", "closer", "erro"]),
+               "wing_ss", "wing_sss", "wing_ex", "buy_2", "confirm", "ok", "closer"]),
     ("equipamento", ["equip_forge", "upgrade", "equip_b", "equip_a", "equip_s",
-                      "equip_ss", "equip_sss", "equip_ex", "confirm", "closer", "erro"]),
+                      "equip_ss", "equip_sss", "equip_ex", "confirm", "closer"]),
+    ("endless", ["mapa", "dog"]),
+    ("hero", ["hero"]),
 ]
 
 STEPS: list[tuple[str, str]] = [(secao, chave) for secao, chaves in SECTIONS for chave in chaves]
@@ -199,7 +201,7 @@ if __name__ == "__main__":
     root.wm_attributes("-alpha", 0.85)
     root.configure(bg="black")
 
-    largura, altura = 280, 110
+    largura, altura = 280, 130
     pos_x = root.winfo_screenwidth() - largura - 20
     root.geometry(f"{largura}x{altura}+{pos_x}+20")
 

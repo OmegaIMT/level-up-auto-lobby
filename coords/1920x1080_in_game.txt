@@ -1,5 +1,3 @@
-fonte=1123,63
 shop_global=1234,1014
-pill=1236,1018
-tesouro=694,905
+fonte=1123,64
 count=961,105
