@@ -45,8 +45,12 @@ ATT_CYCLE_WAIT = 0.13  # espera após cada clique em ATT antes de checar
 ATT_CYCLE_WAIT_NO_CACHE = 0.4  # espera maior quando game.png ainda não tem coordenada em cache (dá tempo de ver a tela)
 MENU_STEP_WAIT = 0.25  # pausa entre cliques no menu (reduzida pela metade)
 SAIR_TIMEOUT = 1.5  # timeout do popup opcional "sair" (reduzido pela metade)
-SALA_TIMEOUT = 170  # sala.png travada (sem erro/aceitar) por mais que isso reinicia o dota
-FIM_TIMEOUT = 240  # fim.png não aparece (aceitar travado) por mais que isso reinicia o dota
+SALA_TIMEOUT = (
+    170  # sala.png travada (sem erro/aceitar) por mais que isso reinicia o dota
+)
+FIM_TIMEOUT = (
+    240  # fim.png não aparece (aceitar travado) por mais que isso reinicia o dota
+)
 
 # ==================================================
 # SESSION CONFIG (gerado pelo start.py)
@@ -55,7 +59,6 @@ SESSION_CONFIG_FILE = sys.argv[1] if len(sys.argv) > 1 else "config.json"
 STATUS_FILE = "status.json"  # status ao vivo, lido pelo painel.py
 LOCK_FILE = "bot.lock"  # sentinela compartilhado com painel.py
 
-UP_PREFIX = "up-"  # sempre digitado no campo de busca
 
 
 def _load_session_config() -> dict:
@@ -162,6 +165,7 @@ if isinstance(raw_pw, list):
 else:
     PASSWORD_FIXED = str(raw_pw)
 
+FILTRO = str(SESSION.get("filtro", "")).strip()  # texto digitado no campo de busca; vazio = pula filtro
 REHOST_MAX: int = SESSION.get("rehost_max", 1)
 LANGUAGE = SESSION.get("language", "pt-br")
 RESOLUTION = SESSION.get("resolution", "1920x1080")
@@ -189,8 +193,9 @@ try:
     _RES_WIDTH = int(RESOLUTION.lower().split("x")[0])
 except Exception:
     _RES_WIDTH = 1920
-CACHE_MARGIN = max(60, round(60 * _RES_WIDTH / 1920))  # px ao redor da coord salva para a região de busca rápida
-
+CACHE_MARGIN = max(
+    60, round(60 * _RES_WIDTH / 1920)
+)  # px ao redor da coord salva para a região de busca rápida
 
 def current_password() -> str:
     return PASSWORD_FIXED
@@ -224,8 +229,16 @@ def _matar_irmaos() -> None:
     """
     if sys.platform != "win32":
         return
-    exe_proprio = os.path.basename(sys.executable).lower() if getattr(sys, "frozen", False) else None
-    alvos = [t for t in ("lobby.exe", "in_game.exe", "fim_game.exe", "painel.exe") if t != exe_proprio]
+    exe_proprio = (
+        os.path.basename(sys.executable).lower()
+        if getattr(sys, "frozen", False)
+        else None
+    )
+    alvos = [
+        t
+        for t in ("lobby.exe", "in_game.exe", "fim_game.exe", "painel.exe")
+        if t != exe_proprio
+    ]
 
     # Popen (sem esperar) em vez de run: os processos-alvo sobrevivem ao
     # pai no Windows, então não precisa bloquear aqui pra eles morrerem -
@@ -237,8 +250,12 @@ def _matar_irmaos() -> None:
             args = ["taskkill", "/F"]
             for t in alvos:
                 args += ["/IM", t]
-            subprocess.Popen(args, startupinfo=HIDDEN_WINDOW,
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(
+                args,
+                startupinfo=HIDDEN_WINDOW,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         except Exception:
             pass
     ps_script = (
@@ -247,11 +264,15 @@ def _matar_irmaos() -> None:
         "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
     )
     try:
-        subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-                          startupinfo=HIDDEN_WINDOW,
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+            startupinfo=HIDDEN_WINDOW,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     except Exception:
         pass
+
 
 def _watch_esc() -> None:
     """
@@ -402,6 +423,19 @@ def wait_for(
     return None
 
 
+def wait_disappear(
+    name: str,
+    confidence: float = 0.7,
+    timeout: float = 60,
+) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not locate(name, confidence):
+            return True
+        time.sleep(0.15)
+    return False
+
+
 def safe_click(pos: Optional[tuple[int, int]], pause: float = CLICK_PAUSE) -> bool:
     if pos:
         pyautogui.moveTo(pos[0], pos[1])
@@ -440,7 +474,7 @@ def step_up_name() -> None:
     pyautogui.press("delete")
     time.sleep(0.5)
 
-    pyautogui.write(UP_PREFIX, interval=0.07)
+    pyautogui.write(FILTRO, interval=0.07)
     time.sleep(0.3)
 
 
@@ -510,7 +544,10 @@ def _restart_with_current_password() -> None:
     _restart_dota()
     step_menu()
     step_password()
-    step_up_name()
+    if FILTRO:
+        wait_disappear("ok.png")
+        time.sleep(0.5)
+        step_up_name()
 
 
 # ==================================================
@@ -556,7 +593,9 @@ def _refresh_until_game_appears(max_attempts: int = 60) -> Optional[tuple[int, i
 
     for _ in range(max_attempts):
         safe_click(att, pause=POLL_ATT)
-        wait_time = ATT_CYCLE_WAIT if "game.png" in _coord_cache else ATT_CYCLE_WAIT_NO_CACHE
+        wait_time = (
+            ATT_CYCLE_WAIT if "game.png" in _coord_cache else ATT_CYCLE_WAIT_NO_CACHE
+        )
         time.sleep(wait_time)
 
         pos = locate("game.png", confidence=0.7)
@@ -573,14 +612,16 @@ def _refresh_until_game_appears(max_attempts: int = 60) -> Optional[tuple[int, i
 
     return None
 
+
 # ==================================================
 # STEP LOBBY
 # ==================================================
 def step_lobby() -> None:
-    lobby_ready = wait_for("200.png", timeout=30)
-    if not lobby_ready:
-        safe_click(locate("att.png"))
-        time.sleep(1.0)
+    if FILTRO:
+        lobby_ready = wait_for("200.png", timeout=30)
+        if not lobby_ready:
+            safe_click(locate("att.png"))
+            time.sleep(1.0)
 
     save_status(rehost_max=REHOST_MAX, current_pw=current_password())
 
@@ -662,8 +703,10 @@ def main() -> None:
     open_dota()
     step_menu()
     step_password()
-    time.sleep(0.5)
-    step_up_name()
+    if FILTRO:
+        wait_disappear("ok.png")
+        time.sleep(0.5)
+        step_up_name()
     step_lobby()
 
     _delete_lock()

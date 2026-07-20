@@ -1,6 +1,7 @@
 {
     "title": "Auto Lobby Level Up",
     "password_1": "密码",
+    "filter": "过滤器",
     "rehost": "重新主机 (比赛)",
     "language": "语言",
     "resolution": "分辨率",

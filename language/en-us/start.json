@@ -1,6 +1,7 @@
 {
     "title": "Auto Lobby Level Up",
     "password_1": "Password",
+    "filter": "Filter",
     "rehost": "Re-Host (Matches)",
     "language": "Language",
     "resolution": "Resolution",

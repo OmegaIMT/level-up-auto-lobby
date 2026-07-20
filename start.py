@@ -192,6 +192,9 @@ def apply_saved_config(saved: dict) -> None:
     entry_rehost.delete(0, "end")
     entry_rehost.insert(0, str(saved.get("rehost_max", 1)))
 
+    entry_filtro.delete(0, "end")
+    entry_filtro.insert(0, str(saved.get("filtro", "")))
+
     saved_language_folder = saved.get("language", "pt-br")
     saved_language_display = LANGUAGES_REVERSE.get(saved_language_folder)
     if saved_language_display:
@@ -227,6 +230,7 @@ def atualizar_interface_idioma(event=None) -> None:
     root.title(TEXT.get("title", "Auto Lobby Level Up"))
     lbl_pw1.config(text=TEXT.get("password_1", "Password"))
     lbl_rehost.config(text=TEXT.get("rehost", "Re-Host (Partidas)"))
+    lbl_filtro.config(text=TEXT.get("filter", "Filtro"))
     lbl_language.config(text=TEXT.get("language", "Idioma"))
     lbl_resolution.config(text=TEXT.get("resolution", "Resolução"))
     chk_crystal.config(text=TEXT.get("crystal", "Cristal"))
@@ -318,6 +322,7 @@ def start() -> None:
 
     pw1 = entry_pw1.get().strip()
     rehost = entry_rehost.get().strip() or "1"
+    filtro = entry_filtro.get().strip()
 
     if not rehost.isdigit() or int(rehost) < 1:
         label_status.config(text=TEXT.get("error_rehost", "Error"), foreground="red")
@@ -329,6 +334,7 @@ def start() -> None:
 
     config = {
         "passwords": pw1,
+        "filtro": filtro,
         "rehost_max": int(rehost) if rehost.isdigit() else 1,
         "partidas_concluidas": 0,
         "ciclos": 0,
@@ -504,11 +510,23 @@ if __name__ == "__main__":
     entry_pw1 = ttk.Entry(row_passwords)
     entry_pw1.pack(fill="x")
 
-    # Campo de Re-Host
-    lbl_rehost = ttk.Label(frame)
+    # Linha Re-Host + Filtro (lado a lado, metade cada)
+    row_rehost_filtro = ttk.Frame(frame)
+    row_rehost_filtro.pack(fill="x", pady=(0, 10))
+
+    col_rehost = ttk.Frame(row_rehost_filtro)
+    col_rehost.pack(side="left", fill="x", expand=True)
+    lbl_rehost = ttk.Label(col_rehost)
     lbl_rehost.pack(anchor="w")
-    entry_rehost = ttk.Entry(frame)
-    entry_rehost.pack(fill="x", pady=(0, 10))
+    entry_rehost = ttk.Entry(col_rehost)
+    entry_rehost.pack(fill="x")
+
+    col_filtro = ttk.Frame(row_rehost_filtro)
+    col_filtro.pack(side="left", fill="x", expand=True, padx=(10, 0))
+    lbl_filtro = ttk.Label(col_filtro)
+    lbl_filtro.pack(anchor="w")
+    entry_filtro = ttk.Entry(col_filtro)
+    entry_filtro.pack(fill="x")
 
     # Linha do Meio (Idioma + Resolução)
     row_middle = ttk.Frame(frame)
