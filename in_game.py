@@ -791,8 +791,8 @@ if __name__ == "__main__":
     threading.Thread(target=_watch_esc, daemon=True).start()
     _cache_load()
 
-    if not wait_for_match_start(timeout=None):
-        sys.exit(1)
+    if not wait_for_match_start(timeout=30):
+        disconnect_and_relaunch()
 
     iniciar_partida()
 

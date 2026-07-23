@@ -599,15 +599,36 @@ def vender_equipamento() -> None:
     _clicar_vender(c, "equip_forge")
 
 
+ENDLESS_DISAPPEAR_TIMEOUT = 5  # após clicar em endless.png, tempo max esperando ele sumir da tela
+
+
+def _aguardar_sumir(
+    cache_key: str, *path_parts: str, confidence: float = 0.75, timeout: float = 5
+) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not locate(cache_key, *path_parts, confidence=confidence):
+            return True
+        time.sleep(0.1)
+    return False
+
+
 def _aguardar_endless_e_clicar(timeout: float = 60) -> bool:
     """Espera language/pt-br/.../in_game/endless.png aparecer e clica (usado
-    duas vezes: seleção do mapa e depois pra confirmar/entrar)."""
+    duas vezes: seleção do mapa e depois pra confirmar/entrar). Depois do
+    clique confirma que o endless.png sumiu da tela antes de seguir - clique
+    perdido (jogo não registrou) deixava o fluxo seguir cego achando que
+    tinha entrado; se não sumir, tenta clicar de novo."""
     started = time.time()
     while True:
         pos = locate("endless_ingame", "endless.png", confidence=0.75)
         if pos:
             click_pos(pos, delay_after=ENDLESS_CLICK_DELAY, rest=False)
-            return True
+            if _aguardar_sumir(
+                "endless_ingame", "endless.png", confidence=0.75, timeout=ENDLESS_DISAPPEAR_TIMEOUT
+            ):
+                return True
+            continue
         if time.time() - started > timeout:
             return False
         time.sleep(0.5)

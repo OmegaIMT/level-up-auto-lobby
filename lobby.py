@@ -51,6 +51,9 @@ SALA_TIMEOUT = (
 FIM_TIMEOUT = (
     240  # fim.png não aparece (aceitar travado) por mais que isso reinicia o dota
 )
+DOTA_OPEN_TIMEOUT = 90  # tempo max esperando a janela do Dota 2 aparecer após steam://run/570
+DOTA_RETRY_INTERVAL = 15  # reenvia steam://run/570 se a janela ainda não apareceu
+MENU_STALL_TIMEOUT = 60  # step_menu sem achar lista.png/image.png por mais que isso: reabre o Dota
 
 # ==================================================
 # SESSION CONFIG (gerado pelo start.py)
@@ -58,7 +61,17 @@ FIM_TIMEOUT = (
 SESSION_CONFIG_FILE = sys.argv[1] if len(sys.argv) > 1 else "config.json"
 STATUS_FILE = "status.json"  # status ao vivo, lido pelo painel.py
 LOCK_FILE = "bot.lock"  # sentinela compartilhado com painel.py
+LOG_FILE = "bot_log.txt"  # console fica oculto (ShowWindow 0) - sem isso print() não vai a lugar nenhum
 
+
+def _log(msg: str) -> None:
+    line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
+    print(line)
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 
 
 def _load_session_config() -> dict:
@@ -451,14 +464,26 @@ def safe_click(pos: Optional[tuple[int, int]], pause: float = CLICK_PAUSE) -> bo
 def open_dota() -> None:
     if focus_dota():
         return
-    try:
-        subprocess.Popen(
-            ["cmd", "/c", "start", "steam://run/570"],
-            startupinfo=HIDDEN_WINDOW,
-        )
-        time.sleep(5.0)
-    except Exception:
-        os._exit(1)
+
+    _log("Janela do Dota 2 não encontrada, abrindo via steam://run/570")
+    deadline = time.time() + DOTA_OPEN_TIMEOUT
+    last_launch = 0.0
+    while time.time() < deadline:
+        if time.time() - last_launch >= DOTA_RETRY_INTERVAL:
+            try:
+                subprocess.Popen(
+                    ["cmd", "/c", "start", "steam://run/570"],
+                    startupinfo=HIDDEN_WINDOW,
+                )
+            except Exception as e:
+                _log(f"Erro ao disparar steam://run/570: {e}")
+            last_launch = time.time()
+
+        time.sleep(1.0)
+        if focus_dota():
+            return
+
+    _log(f"Timeout de {DOTA_OPEN_TIMEOUT}s esperando a janela do Dota 2 abrir")
 
 
 def step_up_name() -> None:
@@ -482,13 +507,21 @@ def step_menu() -> None:
     if not os.path.exists(IMG_DIR):
         os._exit(1)
 
+    stall_start = time.time()
     while True:
         focus_dota()
 
         if locate("lista.png"):
             break
 
-        safe_click(locate("image.png"))
+        if safe_click(locate("image.png")):
+            stall_start = time.time()
+
+        if time.time() - stall_start > MENU_STALL_TIMEOUT:
+            _log("step_menu travado sem achar lista.png/image.png - tentando reabrir o Dota")
+            open_dota()
+            stall_start = time.time()
+
         time.sleep(MENU_STEP_WAIT)
 
     safe_click(locate("lista.png"))
