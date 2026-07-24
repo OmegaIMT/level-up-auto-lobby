@@ -100,6 +100,7 @@ pyautogui.FAILSAFE = True
 # ==================================================
 _mouse_lock = threading.RLock()
 _stop_extras = threading.Event()
+_evento_encontrado = threading.Event()
 
 # Fila de espera: serializa TODAS as ações de suporte (subir status, tesouro,
 # F3 de centralizar câmera) - nunca duas rodando ao mesmo tempo. Quem chama
@@ -686,20 +687,26 @@ def _launch_fim_game() -> None:
 def buscar_evento() -> None:
     """
     6 min após o início da partida, começa a procurar
-    language/global/RESOLUTION/event/event.png continuamente. Só para
-    quando achar (clica e encerra) ou quando a partida encerra (count.png
-    achado -> _stop_extras, ver monitor_match).
-    """
-    if _stop_extras.wait(timeout=EVENTO_WAIT_FIRST):
-        return  # partida encerrou antes de começar a procurar
+    language/global/RESOLUTION/event/event.png continuamente, sem parar
+    mesmo que a partida já tenha encerrado (count.png achado) - só para
+    quando achar e clicar. O monitor_match espera esse clique antes de
+    seguir pro fim_game.py, pra não travar com o evento pendente na tela.
 
-    while not _stop_extras.is_set():
+    Depois do clique, confirma que event.png sumiu antes de dar como
+    resolvido - com mais de uma ação de mouse rodando em paralelo (tesouro/
+    status/F3), o clique às vezes se perde por conflito e o evento continua
+    na tela; se não sumir, tenta de novo.
+    """
+    time.sleep(EVENTO_WAIT_FIRST)
+
+    while True:
         pos = _locate_raw(_global_img("event", "event.png"), confidence=0.75)
         if pos:
             click_pos(pos, 0.3, rest=False)
-            return
-        if _stop_extras.wait(timeout=EVENTO_POLL):
-            return  # partida encerrou enquanto procurava
+            if not _locate_raw(_global_img("event", "event.png"), confidence=0.75):
+                _evento_encontrado.set()
+                return
+        time.sleep(EVENTO_POLL)
 
 # ==================================================
 # ERRO (global, independe de idioma)
@@ -731,6 +738,10 @@ def monitor_match() -> None:
             # (conta a partida, cristal/equipamento, ciclos, decide fechar
             # o dota + voltar pro lobby ou puxar o in_game de novo).
             _stop_extras.set()
+            # Se o evento ainda não foi clicado, espera - ele continua sendo
+            # buscado (buscar_evento não para mais no fim da partida) e, se
+            # ficar pendente na tela, trava a transição pro fim_game.
+            _evento_encontrado.wait()
             _launch_fim_game()
             os._exit(0)
 
@@ -773,6 +784,7 @@ def centralizar_camera() -> None:
 
 def iniciar_partida():
     _stop_extras.clear()
+    _evento_encontrado.clear()
 
     disable_xp()
 

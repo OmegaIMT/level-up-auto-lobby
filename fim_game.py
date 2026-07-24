@@ -457,6 +457,25 @@ def wait_for_match_start(poll: float = 2.0, timeout: Optional[float] = None) -> 
         time.sleep(poll)
 
 
+EVENTO_POLL = 5.0
+
+
+def _buscar_evento_fim() -> None:
+    """Mesma ideia do buscar_evento do in_game.py: procura
+    language/global/RESOLUTION/event/event.png e clica assim que achar.
+    Existe aqui tambem porque o clique pode nao ter acontecido a tempo do
+    lado do in_game.py (que ja morreu quando count.png apareceu) - roda
+    solto em paralelo com o resto do fluxo, sem nunca parar."""
+    while True:
+        try:
+            pos = _locate_raw(_global_img("event", "event.png"), confidence=0.75)
+            if pos:
+                click_pos(pos, 0.3, rest=False)
+        except Exception:
+            pass
+        time.sleep(EVENTO_POLL)
+
+
 POLL_BONUS = 3.0
 
 # Setado pelo _bonus_watcher sempre que clica bonus.png - os fluxos de venda
@@ -795,6 +814,7 @@ def processar_fim_partida() -> None:
 
 if __name__ == "__main__":
     threading.Thread(target=_watch_esc, daemon=True).start()
+    threading.Thread(target=_buscar_evento_fim, daemon=True).start()
     _cache_load()
 
     processar_fim_partida()
