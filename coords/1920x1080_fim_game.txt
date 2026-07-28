@@ -1,8 +1,9 @@
 pena_confirm=979,922
 forja_confirm=1030,521
-pena_confirm_pena=979,922
-fonte=1123,63
+fonte=1123,64
+forja_confirm_forja_1=1861,35
+pena_confirm_pena=978,922
 forja_confirm_forja=1030,521
-count=961,105
-dog_ingame=760,309
-bonus=960,867
+count=961,106
+dog_ingame=771,307
+bonus=960,795

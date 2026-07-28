@@ -3,6 +3,7 @@ import sys
 import time
 import json
 import threading
+import traceback
 import subprocess
 import pyautogui
 from typing import Optional, List
@@ -24,6 +25,15 @@ HIDDEN_WINDOW.dwFlags     |= subprocess.STARTF_USESHOWWINDOW
 HIDDEN_WINDOW.wShowWindow  = 0
 
 CONFIG_FILE = "config.json"
+LOG_FILE = "bot_log.txt"  # mesmo arquivo do lobby.py/fim_game.py - console fica oculto (ShowWindow 0)
+
+def _log(msg: str) -> None:
+    line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] in_game: {msg}"
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 
 def load_config() -> dict:
     if not os.path.exists(CONFIG_FILE):
@@ -663,6 +673,7 @@ def wait_for_match_start(poll: float = 2.0, timeout: Optional[float] = None) -> 
         time.sleep(poll)
 
 def disconnect_and_relaunch() -> None:
+    _log("disconnect_and_relaunch: fechando dota e chamando lobby")
     try:
         os.system("taskkill /f /im dota2.exe >nul 2>&1")
         time.sleep(3)
@@ -677,9 +688,13 @@ def disconnect_and_relaunch() -> None:
 
 def _launch_fim_game() -> None:
     if os.path.exists("fim_game.exe"):
+        _log("_launch_fim_game: subindo fim_game.exe")
         subprocess.Popen(["fim_game.exe"], startupinfo=HIDDEN_WINDOW)
     elif os.path.exists("fim_game.py"):
+        _log("_launch_fim_game: subindo fim_game.py")
         subprocess.Popen([sys.executable, "fim_game.py"], startupinfo=HIDDEN_WINDOW)
+    else:
+        _log("_launch_fim_game: nem fim_game.exe nem fim_game.py encontrados - não subiu nada")
 
 # ==================================================
 # EVENTO (global, independe de idioma/SUPORTE)
@@ -736,12 +751,12 @@ def monitor_match() -> None:
         if pos_count:
             # Fim da partida: a partir daqui quem assume é o fim_game.py
             # (conta a partida, cristal/equipamento, ciclos, decide fechar
-            # o dota + voltar pro lobby ou puxar o in_game de novo).
+            # o dota + voltar pro lobby ou puxar o in_game de novo). Não
+            # espera mais o event.png ser clicado - se count.png já apareceu,
+            # segue direto pro fim_game mesmo que o evento nunca tenha
+            # aparecido (esperar sem timeout travava a transição pra sempre).
+            _log("count.png achado - fim da partida, chamando fim_game")
             _stop_extras.set()
-            # Se o evento ainda não foi clicado, espera - ele continua sendo
-            # buscado (buscar_evento não para mais no fim da partida) e, se
-            # ficar pendente na tela, trava a transição pro fim_game.
-            _evento_encontrado.wait()
             _launch_fim_game()
             os._exit(0)
 
@@ -771,14 +786,21 @@ def monitor_match() -> None:
 CENTRO_DELAY = 5.0
 
 def _pressionar_f3() -> None:
+    # 2 pressões separadas, não uma só - mesmo motivo do clique duplo do
+    # herói (ver ativar_endless/lobby.py): Dota às vezes não reconhece um
+    # único evento de tecla sintético.
     try:
         pyautogui.press("f3")
+        time.sleep(0.15)
+        pyautogui.press("f3")
+        _log("F3 pressionado (centralizar câmera)")
     except Exception:
-        pass
+        _log("F3 falhou:\n" + traceback.format_exc())
 
 def centralizar_camera() -> None:
     """CENTRO ligado: dá F3 (centraliza câmera no herói) uns segundos depois
     da partida começar."""
+    _log(f"centralizar_camera: aguardando {CENTRO_DELAY}s antes do F3")
     time.sleep(CENTRO_DELAY)
     run_extra(_pressionar_f3)
 
@@ -797,16 +819,22 @@ def iniciar_partida():
         threading.Thread(target=monitorar_tesouro, daemon=True).start()
         threading.Thread(target=monitorar_status, daemon=True).start()
     if CENTRO:
+        _log("CENTRO ligado - subindo thread centralizar_camera")
         threading.Thread(target=centralizar_camera, daemon=True).start()
 
 if __name__ == "__main__":
     threading.Thread(target=_watch_esc, daemon=True).start()
     _cache_load()
 
-    if not wait_for_match_start(timeout=30):
-        disconnect_and_relaunch()
+    _log("processo iniciado")
+    try:
+        if not wait_for_match_start(timeout=30):
+            disconnect_and_relaunch()
 
-    iniciar_partida()
+        iniciar_partida()
 
-    save_status(PARTIDAS_CONCLUIDAS, REHOST_MAX, CICLOS_FEITOS)
-    monitor_match()
+        save_status(PARTIDAS_CONCLUIDAS, REHOST_MAX, CICLOS_FEITOS)
+        monitor_match()
+    except Exception:
+        _log("EXCEÇÃO NÃO TRATADA:\n" + traceback.format_exc())
+        raise

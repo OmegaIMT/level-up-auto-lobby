@@ -518,9 +518,9 @@ def step_menu() -> None:
             stall_start = time.time()
 
         if time.time() - stall_start > MENU_STALL_TIMEOUT:
-            _log("step_menu travado sem achar lista.png/image.png - tentando reabrir o Dota")
-            open_dota()
-            stall_start = time.time()
+            _log("step_menu travado sem achar lista.png/image.png - refazendo fluxo completo")
+            focus_dota()
+            return step_menu()
 
         time.sleep(MENU_STEP_WAIT)
 
@@ -611,7 +611,7 @@ def _accept_loop() -> bool:
 # ==================================================
 # LOOP DE ATT INTELIGENTE
 # ==================================================
-def _refresh_until_game_appears(max_attempts: int = 60) -> Optional[tuple[int, int]]:
+def _refresh_until_game_appears(max_attempts: int = 240) -> Optional[tuple[int, int]]:
     """
     Clica em ATT e confere se game.png aparece, sequencial - sem thread
     paralela. O par clicker/observer em threads separadas brigava pelo mouse
@@ -705,11 +705,13 @@ def step_lobby() -> None:
 
         game = _refresh_until_game_appears()
         if not game:
-            safe_click(locate("image.png"))
-            time.sleep(MENU_STEP_WAIT)
-            safe_click(locate("lista.png"))
-            time.sleep(MENU_STEP_WAIT)
-            wait_for("200.png", timeout=30)
+            _log("240 tentativas de ATT sem achar game.png - refazendo fluxo completo (sair, senha, filtro)")
+            step_menu()
+            step_password()
+            if FILTRO:
+                wait_disappear("ok.png")
+                time.sleep(0.5)
+                step_up_name()
             continue
 
         # Game encontrado → dois cliques simples em sequência na posição já

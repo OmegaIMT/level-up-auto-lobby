@@ -10,6 +10,8 @@ auto_lobby.exe
 teste.py
 config.json
 status.json
+bot_log.txt
+users_config.json
 skills-lock.json
 .agents
 .vscode

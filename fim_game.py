@@ -4,6 +4,7 @@ import time
 import json
 import glob
 import threading
+import traceback
 import subprocess
 import pyautogui
 from typing import Optional
@@ -26,6 +27,16 @@ HIDDEN_WINDOW.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 HIDDEN_WINDOW.wShowWindow = 0
 
 CONFIG_FILE = "config.json"
+LOG_FILE = "bot_log.txt"  # mesmo arquivo do lobby.py - console fica oculto (ShowWindow 0), sem isso não dá pra ver nada
+
+
+def _log(msg: str) -> None:
+    line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] fim_game: {msg}"
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 
 
 def load_config() -> dict:
@@ -144,9 +155,11 @@ ENDLESS_CLICK_DELAY = 0.5
 # onde cai de verdade no jogo.
 DOG_CLICK_Y_RATIO = 2.3
 
-# Tempo (s) esperando fonte.png aparecer após count sumir (fim de partida
-# concluída, ainda não bateu rehost_max). Se estourar, mesmo fluxo dos
-# outros timeouts: fecha dota, chama lobby de novo.
+# Tempo (s) total até fonte.png aparecer (próxima partida começou), contado
+# desde o fim da partida atual - roda em watchdog separado (thread), então
+# vale não importa em que função o fluxo esteja no meio (venda de
+# wings/equipamento, endless etc). Se estourar, mesmo fluxo dos outros
+# timeouts: fecha dota, chama lobby de novo.
 TIMEOUT_SEM_FONTE = 600
 
 pyautogui.PAUSE = 0.1
@@ -457,31 +470,20 @@ def wait_for_match_start(poll: float = 2.0, timeout: Optional[float] = None) -> 
         time.sleep(poll)
 
 
-EVENTO_POLL = 5.0
-
-
-def _buscar_evento_fim() -> None:
-    """Mesma ideia do buscar_evento do in_game.py: procura
-    language/global/RESOLUTION/event/event.png e clica assim que achar.
-    Existe aqui tambem porque o clique pode nao ter acontecido a tempo do
-    lado do in_game.py (que ja morreu quando count.png apareceu) - roda
-    solto em paralelo com o resto do fluxo, sem nunca parar."""
-    while True:
-        try:
-            pos = _locate_raw(_global_img("event", "event.png"), confidence=0.75)
-            if pos:
-                click_pos(pos, 0.3, rest=False)
-        except Exception:
-            pass
-        time.sleep(EVENTO_POLL)
-
-
 POLL_BONUS = 3.0
 
 # Setado pelo _bonus_watcher sempre que clica bonus.png - os fluxos de venda
 # (vender_wings/vender_equipamento) checam isso pra saber se o popup atrapalhou
 # os cliques deles (fica por cima da tela) e precisam refazer o fluxo do zero.
 _bonus_interrupt = threading.Event()
+
+# Setado por vender_equipamento() enquanto o fluxo de forja tá rodando - o
+# popup de bonus.png por cima do diálogo de compra às vezes não some com um
+# clique só; nessa etapa o _bonus_watcher checa e, se precisar, fecha com
+# closer.png antes de tentar bonus.png de novo (ver _bonus_watcher).
+_em_equipamento = threading.Event()
+
+BONUS_DISAPPEAR_TIMEOUT = 3.0
 
 
 def _bonus_watcher(wait_once: bool = False) -> None:
@@ -503,6 +505,16 @@ def _bonus_watcher(wait_once: bool = False) -> None:
             if pos:
                 click_pos(pos, 0.5)
                 _bonus_interrupt.set()
+                if _em_equipamento.is_set() and not _aguardar_sumir(
+                    "bonus", "bonus.png", confidence=0.75, timeout=BONUS_DISAPPEAR_TIMEOUT
+                ):
+                    _clicar_vender(EQUIP_COORDS, "closer", 0.5)
+                    pos2 = locate("bonus", "bonus.png", confidence=0.75)
+                    if pos2:
+                        click_pos(pos2, 0.5)
+                        _aguardar_sumir(
+                            "bonus", "bonus.png", confidence=0.75, timeout=BONUS_DISAPPEAR_TIMEOUT
+                        )
                 if wait_once:
                     return
         except Exception:
@@ -604,18 +616,25 @@ def vender_equipamento() -> None:
     ranks = [r for r in RANKS_ORDER if SELL_EQUIPMENT.get(r)]
     if not ranks or not EQUIP_COORDS:
         return
-    c = EQUIP_COORDS
-    if not _abrir_loja_com_confirmacao(
-        c, "equip_forge", "forja_confirm", ["forja.png", "forja_1.png"]
-    ):
-        return
-    _clicar_vender(c, "upgrade", 0.5)
-    for rank in ranks:
-        _clicar_vender(c, f"equip_{rank}")
-    _clicar_vender(c, "confirm", 3.0)
-    _clicar_vender(c, "closer", 0.5)
-    _clicar_vender(c, "closer", 0.5)
-    _clicar_vender(c, "equip_forge")
+    _em_equipamento.set()
+    try:
+        c = EQUIP_COORDS
+        if not _abrir_loja_com_confirmacao(
+            c, "equip_forge", "forja_confirm", ["forja.png", "forja_1.png"]
+        ):
+            return
+        _clicar_vender(c, "upgrade", 0.5)
+        for rank in ranks:
+            _clicar_vender(c, f"equip_{rank}")
+        _clicar_vender(c, "confirm", 3.0)
+        # equipamento não tem "ok" próprio - o diálogo é o mesmo do wings,
+        # centralizado na tela, então reaproveita a coord do wings.
+        _clicar_vender(WINGS_COORDS, "ok", 1.2)
+        _clicar_vender(c, "closer", 0.5)
+        _clicar_vender(c, "closer", 0.5)
+        _clicar_vender(c, "equip_forge")
+    finally:
+        _em_equipamento.clear()
 
 
 ENDLESS_DISAPPEAR_TIMEOUT = 5  # após clicar em endless.png, tempo max esperando ele sumir da tela
@@ -731,6 +750,7 @@ def aguardar_count_reaparecer(timeout: float = 60) -> bool:
 
 def disconnect_and_relaunch() -> None:
     """Fecha o dota e volta pro lobby (fim do ciclo, ou algo travou)."""
+    _log("disconnect_and_relaunch: fechando dota e chamando lobby")
     try:
         os.system("taskkill /f /im dota2.exe >nul 2>&1")
         time.sleep(3)
@@ -746,8 +766,22 @@ def disconnect_and_relaunch() -> None:
     os._exit(0)
 
 
+def _fonte_timeout_watchdog() -> None:
+    """Dispara sozinho (threading.Timer) se TIMEOUT_SEM_FONTE estourar antes
+    da próxima partida começar - não importa em que função o fluxo esteja no
+    meio (venda de wings/equipamento, endless etc). Fecha o dota e chama o
+    lobby de novo direto, sem esperar nada terminar."""
+    global CICLOS_FEITOS
+    _log("watchdog TIMEOUT_SEM_FONTE estourou - fonte.png nunca apareceu")
+    CICLOS_FEITOS += 1
+    save_status(0, REHOST_MAX, CICLOS_FEITOS)
+    save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
+    disconnect_and_relaunch()
+
+
 def _launch_in_game() -> None:
     """Puxa o in_game de novo pra próxima partida do mesmo ciclo."""
+    _log("_launch_in_game: puxando in_game pra próxima partida")
     if os.path.exists("in_game.exe"):
         subprocess.Popen(["in_game.exe"], startupinfo=HIDDEN_WINDOW)
     elif os.path.exists("in_game.py"):
@@ -759,12 +793,14 @@ def processar_fim_partida() -> None:
     global PARTIDAS_CONCLUIDAS, CICLOS_FEITOS
 
     PARTIDAS_CONCLUIDAS += 1
+    _log(f"processar_fim_partida: partida {PARTIDAS_CONCLUIDAS}/{REHOST_MAX} (ciclo {CICLOS_FEITOS})")
     save_status(PARTIDAS_CONCLUIDAS, REHOST_MAX, CICLOS_FEITOS)
     save_config_update(partidas_concluidas=PARTIDAS_CONCLUIDAS)
 
     if PARTIDAS_CONCLUIDAS >= REHOST_MAX:
         # Última partida do ciclo: espera o bonus aparecer e clica antes de
         # fechar (bloqueia aqui, só segue depois de clicar).
+        _log("última partida do ciclo - esperando bonus.png antes de fechar")
         _bonus_watcher(wait_once=True)
 
         CICLOS_FEITOS += 1
@@ -777,6 +813,13 @@ def processar_fim_partida() -> None:
     # enquanto espera a próxima partida começar (ver _bonus_watcher). Bonus
     # tem prioridade sobre tudo - roda solto em paralelo com a venda abaixo.
     threading.Thread(target=_bonus_watcher, daemon=True).start()
+
+    # Watchdog do TIMEOUT_SEM_FONTE já sobe aqui, em paralelo - conta o tempo
+    # total até a próxima partida começar, não importa se o fluxo tá no meio
+    # da venda abaixo, do endless, ou já parado esperando fonte.png.
+    watchdog = threading.Timer(TIMEOUT_SEM_FONTE, _fonte_timeout_watchdog)
+    watchdog.daemon = True
+    watchdog.start()
 
     # Venda: wings primeiro, depois equipamento - só entra na lista quem
     # tem pelo menos um rank marcado no painel "Vender" do start.py. Entre
@@ -792,29 +835,32 @@ def processar_fim_partida() -> None:
         fluxos_venda.append(ativar_endless)
 
     for i, fluxo in enumerate(fluxos_venda):
+        _log(f"iniciando fluxo: {fluxo.__name__}")
         if fluxo is ativar_endless:
             fluxo()
         else:
             _rodar_com_retry_bonus(fluxo)
+        _log(f"fluxo concluído: {fluxo.__name__}")
         if i < len(fluxos_venda) - 1:
             aguardar_count_reaparecer()
 
-    # Espera a próxima partida começar (fonte.png). Se fonte não aparecer
-    # em TIMEOUT_SEM_FONTE, mesmo fluxo dos outros timeouts: fecha dota,
-    # chama lobby de novo.
-    if not wait_for_match_start(timeout=TIMEOUT_SEM_FONTE):
-        CICLOS_FEITOS += 1
-        save_status(0, REHOST_MAX, CICLOS_FEITOS)
-        save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
-        disconnect_and_relaunch()
-        return
+    # Espera a próxima partida começar (fonte.png) - sem timeout aqui, quem
+    # cuida do limite de tempo total é o watchdog que já subiu lá em cima.
+    _log("esperando fonte.png (próxima partida)")
+    wait_for_match_start()
+    watchdog.cancel()
+    _log("fonte.png achado")
 
     _launch_in_game()
 
 
 if __name__ == "__main__":
     threading.Thread(target=_watch_esc, daemon=True).start()
-    threading.Thread(target=_buscar_evento_fim, daemon=True).start()
     _cache_load()
 
-    processar_fim_partida()
+    _log("processo iniciado")
+    try:
+        processar_fim_partida()
+    except Exception:
+        _log("EXCEÇÃO NÃO TRATADA:\n" + traceback.format_exc())
+        raise
