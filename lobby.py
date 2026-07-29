@@ -497,7 +497,10 @@ def step_up_name() -> None:
     pyautogui.hotkey("ctrl", "a")
     time.sleep(0.05)
     pyautogui.press("delete")
-    time.sleep(0.5)
+    time.sleep(0.1)
+    pyautogui.press("backspace", presses=10, interval=0.01)
+    pyautogui.press("delete", presses=10, interval=0.01)
+    time.sleep(0.3)
 
     pyautogui.write(FILTRO, interval=0.07)
     time.sleep(0.3)

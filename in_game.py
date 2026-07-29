@@ -783,7 +783,7 @@ def monitor_match() -> None:
 
         time.sleep(POLL_IN_GAME)
 
-CENTRO_DELAY = 5.0
+CENTRO_DELAY = 20.0
 
 def _pressionar_f3() -> None:
     # 2 pressões separadas, não uma só - mesmo motivo do clique duplo do
