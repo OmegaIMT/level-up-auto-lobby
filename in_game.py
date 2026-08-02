@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import heapq
 import threading
 import traceback
 import subprocess
@@ -112,29 +113,45 @@ _mouse_lock = threading.RLock()
 _stop_extras = threading.Event()
 _evento_encontrado = threading.Event()
 
-# Fila de espera: serializa TODAS as ações de suporte (subir status, tesouro,
-# F3 de centralizar câmera) - nunca duas rodando ao mesmo tempo. Quem chama
-# entra na fila; só o primeiro a achar a fila vazia processa (worker), em
-# ordem de chegada, com 0.5s de respiro entre uma execução e outra.
-_extras_queue: list[tuple] = []
-_extras_queue_lock = threading.Lock()
+# Fila de espera: serializa TODAS as ações de suporte (xp, subir status,
+# mover item, tesouro, F3 de centralizar câmera) - nunca duas rodando ao
+# mesmo tempo. Quem chama entra na fila; só quem acha o worker livre processa
+# (worker), com 0.5s de respiro entre uma execução e outra.
+#
+# Prioridade: heap por (priority, ordem de chegada), não FIFO puro -
+# centralizar_camera (F3) chega atrasada (espera CENTRO_DELAY antes de
+# entrar) mas quando chega fura pra frente de qualquer tarefa de suporte
+# ainda não iniciada, em vez de esperar a vez no fim da fila. O pop já tira
+# o próximo item do heap antes de rodar `f()`, então uma inserção
+# concorrente durante a execução nunca disputa o item em andamento.
+PRIORITY_CENTRO = 0   # F3 (centralizar câmera) - sempre primeiro quando chega
+PRIORITY_XP = 1        # desabilitar XP
+PRIORITY_DEFAULT = 2   # suporte (status, itens, tesouro) - resto
 
-def run_extra(fn, *args, **kwargs) -> None:
+_extras_heap: list[tuple[int, int, object, tuple, dict]] = []  # heapq: (priority, seq, fn, args, kwargs)
+_extras_queue_lock = threading.Lock()
+_extras_seq_counter = 0
+_extras_worker_running = False
+
+def run_extra(fn, *args, priority: int = PRIORITY_DEFAULT, **kwargs) -> None:
+    global _extras_seq_counter, _extras_worker_running
     with _extras_queue_lock:
-        _extras_queue.append((fn, args, kwargs))
-        if len(_extras_queue) > 1:
-            return  # já tem worker processando a fila, só entra na lista
+        _extras_seq_counter += 1
+        heapq.heappush(_extras_heap, (priority, _extras_seq_counter, fn, args, kwargs))
+        if _extras_worker_running:
+            return  # já tem worker processando a fila, só entra no heap
+        _extras_worker_running = True
 
     while True:
         with _extras_queue_lock:
-            f, a, kw = _extras_queue[0]
+            _, _, f, a, kw = heapq.heappop(_extras_heap)
         try:
             f(*a, **kw)
         except Exception:
             pass
         with _extras_queue_lock:
-            _extras_queue.pop(0)
-            if not _extras_queue:
+            if not _extras_heap:
+                _extras_worker_running = False
                 return
         time.sleep(0.5)
 
@@ -783,7 +800,7 @@ def monitor_match() -> None:
 
         time.sleep(POLL_IN_GAME)
 
-CENTRO_DELAY = 20.0
+CENTRO_DELAY = 10.0
 
 def _pressionar_f3() -> None:
     # 2 pressões separadas, não uma só - mesmo motivo do clique duplo do
@@ -799,28 +816,32 @@ def _pressionar_f3() -> None:
 
 def centralizar_camera() -> None:
     """CENTRO ligado: dá F3 (centraliza câmera no herói) uns segundos depois
-    da partida começar."""
+    da partida começar. Entra na fila com PRIORITY_CENTRO - quando chegar,
+    fura pra frente de qualquer tarefa de suporte ainda não iniciada."""
     _log(f"centralizar_camera: aguardando {CENTRO_DELAY}s antes do F3")
     time.sleep(CENTRO_DELAY)
-    run_extra(_pressionar_f3)
+    run_extra(_pressionar_f3, priority=PRIORITY_CENTRO)
 
 def iniciar_partida():
     _stop_extras.clear()
     _evento_encontrado.clear()
 
-    disable_xp()
-
-    if SUPORTE:
-        run_extra(subir_status)
-        verificar_e_mover_itens()
-
     threading.Thread(target=buscar_evento, daemon=True).start()
-    if SUPORTE:
-        threading.Thread(target=monitorar_tesouro, daemon=True).start()
-        threading.Thread(target=monitorar_status, daemon=True).start()
     if CENTRO:
         _log("CENTRO ligado - subindo thread centralizar_camera")
         threading.Thread(target=centralizar_camera, daemon=True).start()
+
+    # Antes rodavam direto (fora da fila) e podiam sobrepor com as tarefas
+    # de suporte que chegassem nesse meio-tempo - agora tudo passa pela
+    # mesma fila priorizada: xp primeiro, suporte depois, centro fura fila
+    # quando chegar (ver PRIORITY_* acima).
+    run_extra(disable_xp, priority=PRIORITY_XP)
+
+    if SUPORTE:
+        run_extra(subir_status)
+        run_extra(verificar_e_mover_itens)
+        threading.Thread(target=monitorar_tesouro, daemon=True).start()
+        threading.Thread(target=monitorar_status, daemon=True).start()
 
 if __name__ == "__main__":
     threading.Thread(target=_watch_esc, daemon=True).start()

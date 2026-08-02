@@ -227,7 +227,7 @@ def atualizar_interface_idioma(event=None) -> None:
 
     load_language(language_folder)
 
-    root.title(TEXT.get("title", "Auto Lobby Level Up"))
+    root.title(f"{TEXT.get('title', 'Auto Lobby Level Up')} - {updater.get_local_version()}")
     lbl_pw1.config(text=TEXT.get("password_1", "Password"))
     lbl_rehost.config(text=TEXT.get("rehost", "Re-Host (Partidas)"))
     lbl_filtro.config(text=TEXT.get("filter", "Filtro"))

@@ -54,6 +54,7 @@ FIM_TIMEOUT = (
 DOTA_OPEN_TIMEOUT = 90  # tempo max esperando a janela do Dota 2 aparecer após steam://run/570
 DOTA_RETRY_INTERVAL = 15  # reenvia steam://run/570 se a janela ainda não apareceu
 MENU_STALL_TIMEOUT = 60  # step_menu sem achar lista.png/image.png por mais que isso: reabre o Dota
+ADAPTIVE_DELAY_CAP = 3.0  # teto do buffer adaptativo abaixo, pra não herdar um travamento (ex: MENU_STALL_TIMEOUT) como espera
 
 # ==================================================
 # SESSION CONFIG (gerado pelo start.py)
@@ -212,6 +213,24 @@ CACHE_MARGIN = max(
 
 def current_password() -> str:
     return PASSWORD_FIXED
+
+
+# ==================================================
+# BUFFER ADAPTATIVO (PC fraco)
+# ==================================================
+# Em PC fraco, a imagem já bateu (lista.png achado / ok.png sumido) mas a UI
+# por trás pode ainda não estar pronta pra receber input - o campo de senha/
+# filtro só ganha foco de verdade um pouco depois. Em vez de um sleep fixo
+# que funciona na máquina do dev e falha na do usuário, usamos o próprio
+# tempo que a transição anterior levou (quão devagar essa máquina está agora)
+# como estimativa de quanto esperar antes de digitar.
+_menu_render_delay = MENU_STEP_WAIT  # quanto lista.png demorou a aparecer - cruza step_menu -> step_password
+
+
+def _elapsed_since(start: float) -> float:
+    """Tempo decorrido desde `start`, limitado por ADAPTIVE_DELAY_CAP pra não
+    herdar um travamento (ex: MENU_STALL_TIMEOUT) como buffer de espera."""
+    return min(time.time() - start, ADAPTIVE_DELAY_CAP)
 
 
 def _delete_lock() -> None:
@@ -507,10 +526,12 @@ def step_up_name() -> None:
 
 
 def step_menu() -> None:
+    global _menu_render_delay
     if not os.path.exists(IMG_DIR):
         os._exit(1)
 
-    stall_start = time.time()
+    menu_start = time.time()
+    stall_start = menu_start
     while True:
         focus_dota()
 
@@ -527,13 +548,17 @@ def step_menu() -> None:
 
         time.sleep(MENU_STEP_WAIT)
 
+    # confirmado: lista.png visível - guarda quanto demorou pra aparecer,
+    # usado mais adiante como buffer antes de digitar a senha.
+    _menu_render_delay = _elapsed_since(menu_start)
+
     safe_click(locate("lista.png"))
     time.sleep(MENU_STEP_WAIT)
 
     sair = wait_for("sair.png", timeout=SAIR_TIMEOUT)
     if sair:
         safe_click(sair)
-        time.sleep(MENU_STEP_WAIT)
+        wait_disappear("sair.png", timeout=SAIR_TIMEOUT)
 
     safe_click(wait_for("lobby.png"), pause=0.4)
 
@@ -543,7 +568,7 @@ def step_password() -> None:
     if not ok_pos:
         return
 
-    time.sleep(0.3)
+    time.sleep(max(_menu_render_delay, 0.3))
     focus_dota()
     pyautogui.hotkey("ctrl", "a")
     time.sleep(0.1)
@@ -553,6 +578,20 @@ def step_password() -> None:
     time.sleep(0.2)
     safe_click(ok_pos)
     time.sleep(0.3)
+
+
+def _proceed_to_filter() -> None:
+    """Espera ok.png sumir e digita o filtro. O tempo que ok.png levou pra
+    sumir vira o buffer extra antes de digitar - mesma lógica do
+    _menu_render_delay, pra PC lento não perder o campo de busca."""
+    if not FILTRO:
+        return
+
+    disappear_start = time.time()
+    wait_disappear("ok.png")
+
+    time.sleep(max(_elapsed_since(disappear_start), 0.3))
+    step_up_name()
 
 
 def _launch_in_game() -> None:
@@ -580,10 +619,7 @@ def _restart_with_current_password() -> None:
     _restart_dota()
     step_menu()
     step_password()
-    if FILTRO:
-        wait_disappear("ok.png")
-        time.sleep(0.5)
-        step_up_name()
+    _proceed_to_filter()
 
 
 # ==================================================
@@ -711,10 +747,7 @@ def step_lobby() -> None:
             _log("240 tentativas de ATT sem achar game.png - refazendo fluxo completo (sair, senha, filtro)")
             step_menu()
             step_password()
-            if FILTRO:
-                wait_disappear("ok.png")
-                time.sleep(0.5)
-                step_up_name()
+            _proceed_to_filter()
             continue
 
         # Game encontrado → dois cliques simples em sequência na posição já
@@ -741,10 +774,7 @@ def main() -> None:
     open_dota()
     step_menu()
     step_password()
-    if FILTRO:
-        wait_disappear("ok.png")
-        time.sleep(0.5)
-        step_up_name()
+    _proceed_to_filter()
     step_lobby()
 
     _delete_lock()
