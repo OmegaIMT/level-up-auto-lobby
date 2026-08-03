@@ -7,7 +7,7 @@ import threading
 import traceback
 import subprocess
 import pyautogui
-from typing import Optional, List
+from typing import Callable, Optional, List
 
 if sys.platform == "win32":
     import ctypes
@@ -60,8 +60,10 @@ LANGUAGE   = CONFIG.get("language", "pt-br")
 RESOLUTION = CONFIG.get("resolution", "1920x1080")
 
 NO_XP      = bool(CONFIG.get("no_xp", True))
+GOLD       = bool(CONFIG.get("gold", False))
 SUPORTE    = bool(CONFIG.get("support", True))
 CENTRO     = bool(CONFIG.get("center", False))
+ROSHAN     = bool(CONFIG.get("roshan", False))
 
 # IMG_DIR: agora só guarda o que continua dependente de idioma (count).
 IMG_DIR = os.path.join("language", LANGUAGE, RESOLUTION, "in_game")
@@ -88,6 +90,9 @@ CACHE_MARGIN      = max(60, round(60 * _RES_WIDTH / 1920))  # escala com a resol
 POLL_IN_GAME      = 2.0
 POLL_TESOURO      = 10.0
 POLL_STATUS       = 30.0
+POLL_ROSHAN       = 5.0
+ROSHAN_WAIT_FIRST = 300.0  # espera antes de começar a checar roshan.png - não existe/não faz sentido checar logo no início da partida
+ROSHAN_CLICK_WAIT = 2.0  # clica e espera antes de pressionar 'd' - mesmo esquema do ativar_endless (fim_game.py)
 TIMEOUT_SEM_COUNT = 4800
 
 # Tempo (s) sem ver count.png a partir do qual passamos a checar as imagens
@@ -112,6 +117,7 @@ pyautogui.FAILSAFE = True
 _mouse_lock = threading.RLock()
 _stop_extras = threading.Event()
 _evento_encontrado = threading.Event()
+_roshan_feito = threading.Event()  # roshan.png só é clicado uma vez por partida (ver monitorar_roshan)
 
 # Fila de espera: serializa TODAS as ações de suporte (xp, subir status,
 # mover item, tesouro, F3 de centralizar câmera) - nunca duas rodando ao
@@ -128,7 +134,7 @@ PRIORITY_CENTRO = 0   # F3 (centralizar câmera) - sempre primeiro quando chega
 PRIORITY_XP = 1        # desabilitar XP
 PRIORITY_DEFAULT = 2   # suporte (status, itens, tesouro) - resto
 
-_extras_heap: list[tuple[int, int, object, tuple, dict]] = []  # heapq: (priority, seq, fn, args, kwargs)
+_extras_heap: list[tuple[int, int, Callable, tuple, dict]] = []  # heapq: (priority, seq, fn, args, kwargs)
 _extras_queue_lock = threading.Lock()
 _extras_seq_counter = 0
 _extras_worker_running = False
@@ -409,6 +415,7 @@ def _c(key: str) -> Optional[tuple[int, int]]:
 SLOT_20_BASE = _c("slot_20")
 
 XP_BUTTON_BASE              = _c("no_xp")
+ON_GOLD_BUTTON_BASE         = _c("on_gold")  # toggle de mostrar gold - não confundir com GOLD_BASE (ícone de gold da loja)
 PUBLIC_BACKPACK_TARGET_BASE = _c("public_backpack_target")
 ORGANIZAR_BASE              = _c("organizar")
 GOLD_BASE                   = _c("gold")
@@ -673,10 +680,52 @@ def monitorar_tesouro() -> None:
         run_extra(_tesouro_cycle, imagens_tesouro)
         _stop_extras.wait(POLL_TESOURO)
 
+def _roshan_cycle() -> None:
+    """ROSHAN ligado: acha roshan.png (ícone fica visível o tempo todo,
+    com o timer de respawn contando por cima - o template só cobre o
+    ícone, não o número, então bate igual em qualquer valor do timer).
+    Clica com o esquerdo, espera ROSHAN_CLICK_WAIT e pressiona 'd' - mesmo
+    esquema do ativar_endless (fim_game.py). Só acontece uma vez por
+    partida - marca _roshan_feito pra monitorar_roshan parar de checar."""
+    try:
+        pos = locate("roshan", "suporte", "roshan.png", confidence=0.8, base_dir=GLOBAL_DIR)
+        if not pos or _stop_extras.is_set():
+            return
+
+        click_pos(pos, delay_after=ROSHAN_CLICK_WAIT)
+        if _stop_extras.is_set():
+            return
+
+        pyautogui.press("d")
+        _log("roshan.png achado - clicado e 'd' pressionado")
+        _roshan_feito.set()
+    except Exception:
+        _log("_roshan_cycle falhou:\n" + traceback.format_exc())
+
+def monitorar_roshan() -> None:
+    """Igual monitorar_tesouro (checa roshan.png a cada POLL_ROSHAN, via
+    fila), mas roda só até achar uma vez - roshan não reaparece na mesma
+    partida como o tesouro reaparece. Espera ROSHAN_WAIT_FIRST antes de
+    começar a checar - mesmo esquema do buscar_evento (EVENTO_WAIT_FIRST)."""
+    _roshan_feito.clear()
+    if _stop_extras.wait(ROSHAN_WAIT_FIRST):
+        return
+    while not _stop_extras.is_set() and not _roshan_feito.is_set():
+        run_extra(_roshan_cycle)
+        _stop_extras.wait(POLL_ROSHAN)
+
 def disable_xp() -> None:
     if not NO_XP or XP_BUTTON_BASE is None:
         return
     x, y = scale_coord(XP_BUTTON_BASE)
+    _click_at(x, y, right=True, delay=0.2)
+
+def ativar_gold() -> None:
+    """Mesmo esquema do disable_xp - clique direito na coordenada
+    (on_gold), só que pro toggle de mostrar gold."""
+    if not GOLD or ON_GOLD_BUTTON_BASE is None:
+        return
+    x, y = scale_coord(ON_GOLD_BUTTON_BASE)
     _click_at(x, y, right=True, delay=0.2)
 
 def wait_for_match_start(poll: float = 2.0, timeout: Optional[float] = None) -> bool:
@@ -833,15 +882,20 @@ def iniciar_partida():
 
     # Antes rodavam direto (fora da fila) e podiam sobrepor com as tarefas
     # de suporte que chegassem nesse meio-tempo - agora tudo passa pela
-    # mesma fila priorizada: xp primeiro, suporte depois, centro fura fila
-    # quando chegar (ver PRIORITY_* acima).
+    # mesma fila priorizada: xp/gold primeiro, suporte depois, centro fura
+    # fila quando chegar (ver PRIORITY_* acima).
     run_extra(disable_xp, priority=PRIORITY_XP)
+    run_extra(ativar_gold, priority=PRIORITY_XP)
 
     if SUPORTE:
         run_extra(subir_status)
         run_extra(verificar_e_mover_itens)
         threading.Thread(target=monitorar_tesouro, daemon=True).start()
         threading.Thread(target=monitorar_status, daemon=True).start()
+
+    if ROSHAN:
+        _log("ROSHAN ligado - subindo thread monitorar_roshan")
+        threading.Thread(target=monitorar_roshan, daemon=True).start()
 
 if __name__ == "__main__":
     threading.Thread(target=_watch_esc, daemon=True).start()

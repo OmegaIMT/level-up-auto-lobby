@@ -41,8 +41,7 @@ POLL_NORMAL = 0.03  # polling padrão do loop de lobby
 POLL_ATT = 0.05  # intervalo entre cliques no botão de atualizar
 CLICK_PAUSE = 0.03  # pausa antes de cada clique
 FOCUS_WAIT = 0.8  # tempo para o Windows processar foco
-ATT_CYCLE_WAIT = 0.13  # espera após cada clique em ATT antes de checar
-ATT_CYCLE_WAIT_NO_CACHE = 0.4  # espera maior quando game.png ainda não tem coordenada em cache (dá tempo de ver a tela)
+ATT_CYCLE_WAIT_NO_CACHE = 0.4  # espera após cada clique em ATT antes de checar game.png (sem cache - ver locate_fresh)
 MENU_STEP_WAIT = 0.25  # pausa entre cliques no menu (reduzida pela metade)
 SAIR_TIMEOUT = 1.5  # timeout do popup opcional "sair" (reduzido pela metade)
 SALA_TIMEOUT = (
@@ -441,6 +440,21 @@ def locate(name: str, confidence: float = 0.7) -> Optional[tuple[int, int]]:
     return pos
 
 
+def locate_fresh(name: str, confidence: float = 0.7) -> Optional[tuple[int, int]]:
+    """locate() sem cache - sempre varre a tela inteira. Usado só no loop de
+    ATT (_refresh_until_game_appears): game.png é a linha do lobby buscado,
+    a posição muda a cada busca (nº de resultados, scroll) - uma coordenada
+    cacheada de uma partida anterior aponta pra um lugar que pode não ter
+    nada, e o bot fica clicando ATT sem nunca redetectar o jogo (era
+    literalmente isso: coords/*_lobby.txt vem versionado com um game.png
+    fixo, capturado numa busca específica, que não serve pra outra). att.png
+    entra no mesmo bypass por rodar no mesmo loop - o resto do fluxo (menu,
+    senha, sala) continua cacheado normalmente."""
+    pos = _locate_raw(name, confidence)
+    _update_debug(name, pos is not None)
+    return pos
+
+
 def wait_for(
     name: str,
     confidence: float = 0.7,
@@ -656,8 +670,12 @@ def _refresh_until_game_appears(max_attempts: int = 240) -> Optional[tuple[int, 
     paralela. O par clicker/observer em threads separadas brigava pelo mouse
     (_mouse_lock) e pela mesma imagem ao mesmo tempo, e a corrida entre as
     duas fazia perder sala.png. Loop simples: clica, espera, confere.
+
+    att.png/game.png usam locate_fresh (sem cache) - game.png é a linha do
+    lobby buscado, muda de posição a cada busca, cache aqui fazia o bot ficar
+    só atualizando sem nunca entrar (ver locate_fresh).
     """
-    att = locate("att.png")
+    att = locate_fresh("att.png")
     if not att:
         return None
 
@@ -665,12 +683,9 @@ def _refresh_until_game_appears(max_attempts: int = 240) -> Optional[tuple[int, 
 
     for _ in range(max_attempts):
         safe_click(att, pause=POLL_ATT)
-        wait_time = (
-            ATT_CYCLE_WAIT if "game.png" in _coord_cache else ATT_CYCLE_WAIT_NO_CACHE
-        )
-        time.sleep(wait_time)
+        time.sleep(ATT_CYCLE_WAIT_NO_CACHE)
 
-        pos = locate("game.png", confidence=0.7)
+        pos = locate_fresh("game.png", confidence=0.7)
         if pos:
             return pos
 
@@ -680,7 +695,7 @@ def _refresh_until_game_appears(max_attempts: int = 240) -> Optional[tuple[int, 
             safe_click(full_pop, pause=0.1)
             time.sleep(0.2)
 
-        att = locate("att.png") or att
+        att = locate_fresh("att.png") or att
 
     return None
 

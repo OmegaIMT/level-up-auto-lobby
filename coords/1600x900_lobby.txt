@@ -5,7 +5,5 @@ lobby.png=765,694
 ok.png=841,505
 buscar.png=299,693
 200.png=311,136
-att.png=1319,141
-game.png=328,205
 aceitar.png=799,426
 fim.png=799,695

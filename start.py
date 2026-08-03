@@ -104,7 +104,7 @@ def load_rank_icons(canvas_size: int = 44) -> None:
             continue
         img = Image.open(path).convert("RGBA")
         if img.width > canvas_size or img.height > canvas_size:
-            img.thumbnail((canvas_size, canvas_size), Image.LANCZOS)
+            img.thumbnail((canvas_size, canvas_size), Image.Resampling.LANCZOS)
         canvas = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
         canvas.paste(img, ((canvas_size - img.width) // 2, (canvas_size - img.height) // 2), img)
         _rank_icons[rank] = ImageTk.PhotoImage(canvas)
@@ -116,12 +116,12 @@ def load_endless_icon(max_width: int = 300, max_height: int = 60) -> None:
         return
     img = Image.open(path).convert("RGBA")
     if img.width > max_width or img.height > max_height:
-        img.thumbnail((max_width, max_height), Image.LANCZOS)
+        img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
     _endless_icon = ImageTk.PhotoImage(img)
 
 SELECTED_BG = "#4a90d9"  # cor única de destaque pra todo rank marcado (padronizado)
 
-def build_rank_row(parent: ttk.Frame) -> dict[str, tk.BooleanVar]:
+def build_rank_row(parent: tk.Misc) -> dict[str, tk.BooleanVar]:
     """tk.Checkbutton nativo aqui saía com um círculo preto feio (chrome do
     tema do Windows em cima do botão) - Label + clique próprio não sofre
     esse chrome, só o ícone, com um destaque uniforme quando marcado."""
@@ -132,7 +132,7 @@ def build_rank_row(parent: ttk.Frame) -> dict[str, tk.BooleanVar]:
     for rank in RANKS:
         var = tk.BooleanVar()
         variables[rank] = var
-        lbl = tk.Label(row, image=_rank_icons.get(rank), bg=idle_bg, bd=0, padx=3, pady=2)
+        lbl = tk.Label(row, image=_rank_icons.get(rank) or "", bg=idle_bg, bd=0, padx=3, pady=2)
         lbl.pack(side="left", padx=2)
 
         def _on_change(*_args, v=var, w=lbl):
@@ -142,14 +142,14 @@ def build_rank_row(parent: ttk.Frame) -> dict[str, tk.BooleanVar]:
         lbl.bind("<Button-1>", lambda _event, v=var: v.set(not v.get()))
     return variables
 
-def build_endless_toggle(parent: ttk.Frame) -> tk.BooleanVar:
+def build_endless_toggle(parent: tk.Misc) -> tk.BooleanVar:
     """Mesmo esquema do build_rank_row (Label + clique próprio), só que pra
     um item único (endless.png já é o próprio rótulo, sem ícone + texto)."""
     row = ttk.Frame(parent)
     row.pack(pady=(4, 8))
     idle_bg = row.winfo_toplevel().cget("bg")
     var = tk.BooleanVar()
-    lbl = tk.Label(row, image=_endless_icon, bg=idle_bg, bd=0, padx=3, pady=2)
+    lbl = tk.Label(row, image=_endless_icon or "", bg=idle_bg, bd=0, padx=3, pady=2)
     lbl.pack()
 
     def _on_change(*_args):
@@ -207,8 +207,10 @@ def apply_saved_config(saved: dict) -> None:
     crystal_var.set(bool(saved.get("crystal", False)))
     equipment_var.set(bool(saved.get("equipment", False)))
     no_xp_var.set(bool(saved.get("no_xp", False)))
+    gold_var.set(bool(saved.get("gold", False)))
     support_var.set(bool(saved.get("support", False)))
     center_var.set(bool(saved.get("center", False)))
+    roshan_var.set(bool(saved.get("roshan", False)))
     endless_var.set(bool(saved.get("endless", False)))
 
     saved_sell_equipment = saved.get("sell_equipment", {})
@@ -221,21 +223,31 @@ def apply_saved_config(saved: dict) -> None:
 
     atualizar_interface_idioma()
 
+RESOLUTION_PT_BR_ONLY = "3440x1440"  # maior resolução - só selecionável em pt-br, some do combo nos outros idiomas
+
 def atualizar_interface_idioma(event=None) -> None:
     language_display = language_var.get()
     language_folder = LANGUAGES.get(language_display, "pt-br")
 
     load_language(language_folder)
 
+    if language_folder == "pt-br":
+        combo_resolution["values"] = list(RESOLUTIONS.keys())
+    else:
+        combo_resolution["values"] = [r for r in RESOLUTIONS if r != RESOLUTION_PT_BR_ONLY]
+        if resolution_var.get() == RESOLUTION_PT_BR_ONLY:
+            resolution_var.set("1920x1080")
+
     root.title(f"{TEXT.get('title', 'Auto Lobby Level Up')} - {updater.get_local_version()}")
     lbl_pw1.config(text=TEXT.get("password_1", "Password"))
-    lbl_rehost.config(text=TEXT.get("rehost", "Re-Host (Partidas)"))
+    # lbl_rehost/chk_no_xp/chk_gold/chk_roshan: texto global, fixo em todo
+    # idioma (definido na criação do widget, ver UI INITIALIZATION) - não
+    # entra aqui.
     lbl_filtro.config(text=TEXT.get("filter", "Filtro"))
     lbl_language.config(text=TEXT.get("language", "Idioma"))
     lbl_resolution.config(text=TEXT.get("resolution", "Resolução"))
     chk_crystal.config(text=TEXT.get("crystal", "Cristal"))
     chk_equipment.config(text=TEXT.get("equipment", "Equipamentos"))
-    chk_no_xp.config(text=TEXT.get("no_xp", "Desativar XP"))
     chk_support.config(text=TEXT.get("support", "Suporte"))
     chk_center.config(text=TEXT.get("center", "Centro"))
     vender_frame.config(text=TEXT.get("sell", "Vender"))
@@ -343,8 +355,10 @@ def start() -> None:
         "crystal": crystal_var.get(),
         "equipment": equipment_var.get(),
         "no_xp": no_xp_var.get(),
+        "gold": gold_var.get(),
         "support": support_var.get(),
         "center": center_var.get(),
+        "roshan": roshan_var.get(),
         "endless": endless_var.get(),
         "sell_equipment": {rank: var.get() for rank, var in sell_equipment_vars.items()},
         "sell_wings": {rank: var.get() for rank, var in sell_wings_vars.items()},
@@ -516,7 +530,7 @@ if __name__ == "__main__":
 
     col_rehost = ttk.Frame(row_rehost_filtro)
     col_rehost.pack(side="left", fill="x", expand=True)
-    lbl_rehost = ttk.Label(col_rehost)
+    lbl_rehost = ttk.Label(col_rehost, text="Re-Lobby")  # global, não traduzido
     lbl_rehost.pack(anchor="w")
     entry_rehost = ttk.Entry(col_rehost)
     entry_rehost.pack(fill="x")
@@ -549,7 +563,8 @@ if __name__ == "__main__":
     combo_resolution = ttk.Combobox(col_resolution, textvariable=resolution_var, state="readonly", values=list(RESOLUTIONS.keys()))
     combo_resolution.pack(fill="x")
 
-    # Checkboxes (3: Cristal, Equipamentos, Desativar XP)
+    # Checkboxes (Cristal, Equipamentos, XP, Gold - XP/Gold têm texto global,
+    # não traduzido, ver atualizar_interface_idioma)
     checkbox_row = ttk.Frame(frame)
     checkbox_row.pack(fill="x", pady=(12, 12))
     crystal_var = tk.BooleanVar()
@@ -559,10 +574,14 @@ if __name__ == "__main__":
     chk_equipment = ttk.Checkbutton(checkbox_row, variable=equipment_var)
     chk_equipment.pack(side="left", padx=(20, 0))
     no_xp_var = tk.BooleanVar()
-    chk_no_xp = ttk.Checkbutton(checkbox_row, variable=no_xp_var)
+    chk_no_xp = ttk.Checkbutton(checkbox_row, text="XP", variable=no_xp_var)
     chk_no_xp.pack(side="left", padx=(20, 0))
+    gold_var = tk.BooleanVar()
+    chk_gold = ttk.Checkbutton(checkbox_row, text="Gold", variable=gold_var)
+    chk_gold.pack(side="left", padx=(20, 0))
 
-    # Linha separada para "Support" (evita espremer o layout de 350px)
+    # Linha separada para "Support" (evita espremer o layout de 350px) -
+    # Roshan tem texto global, não traduzido, mesmo esquema do XP/Gold acima.
     checkbox_row_2 = ttk.Frame(frame)
     checkbox_row_2.pack(fill="x", pady=(0, 12))
     support_var = tk.BooleanVar()
@@ -571,6 +590,9 @@ if __name__ == "__main__":
     center_var = tk.BooleanVar()
     chk_center = ttk.Checkbutton(checkbox_row_2, variable=center_var)
     chk_center.pack(side="left", padx=(20, 0))
+    roshan_var = tk.BooleanVar()
+    chk_roshan = ttk.Checkbutton(checkbox_row_2, text="Roshan", variable=roshan_var)
+    chk_roshan.pack(side="left", padx=(20, 0))
 
     # Coluna direita: painel "Vender" (rank de equipamento/wings a vender) em
     # cima, painel "Bonus" (toggle endless) embaixo - bordas finas, style

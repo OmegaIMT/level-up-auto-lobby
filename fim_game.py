@@ -68,8 +68,18 @@ RESOLUTION = CONFIG.get("resolution", "1920x1080")
 # IMG_DIR: bonus.png ("I am the champion"), dependente de idioma.
 IMG_DIR = os.path.join("language", LANGUAGE, RESOLUTION, "in_game")
 
+# FIM_GAME_IMG_DIR: batch/cancel/confirm/go_it.png (botões de texto da
+# compra em lote de wings) - dependente de idioma, pasta própria (separada
+# de IMG_DIR/in_game).
+FIM_GAME_IMG_DIR = os.path.join("language", LANGUAGE, RESOLUTION, "fim_game")
+
 # GLOBAL_DIR: fonte.png (início da próxima partida), independente de idioma.
 GLOBAL_DIR = os.path.join("language", "global", RESOLUTION)
+
+# WINGS_IMG_DIR: ícone de cada rank de wings (a/b/s/ss/sss/ex.png) - só
+# ícone, independente de idioma, usado pra marcar os ranks vendidos por
+# imagem em vez de coordenada fixa (ver vender_wings).
+WINGS_IMG_DIR = os.path.join(GLOBAL_DIR, "wings")
 
 REHOST_MAX = int(CONFIG.get("rehost_max", 5))
 CICLOS_FEITOS = int(CONFIG.get("ciclos", 0))
@@ -584,12 +594,26 @@ def _abrir_loja_com_confirmacao(
     return False
 
 
+BATCH_WAIT_TIMEOUT = 10.0    # esperando batch.png aparecer (abre/confirma a lista)
+RANK_ICON_WAIT_TIMEOUT = 5.0  # esperando o ícone de cada rank marcado aparecer - wings e equipamento reaproveitam os mesmos ícones (WINGS_IMG_DIR)
+BRANCH_CHECK_TIMEOUT = 1.0   # só decide qual ramo do fluxo seguir (cancel em wings / confirm em equip), não é uma espera "de verdade"
+GO_IT_WAIT_TIMEOUT = 10.0    # esperando o popup de sucesso (go_it.png) aparecer - só wings
+
+
 def vender_wings() -> None:
     """
-    Abre a loja de Wings, abre a lista de itens (buy) uma vez só, marca
+    Abre a loja de Wings, abre a lista de itens (wings) uma vez só, marca
     (clica) cada rank selecionado em sequência e só então confirma a compra
-    inteira de uma vez (buy_2/confirm/ok) - não reabre buy nem confirma por
-    rank individualmente.
+    inteira de uma vez (batch/confirm/go_it) - não reabre a lista nem
+    confirma por rank individualmente.
+
+    A partir do batch.png o fluxo é por imagem (FIM_GAME_IMG_DIR/
+    WINGS_IMG_DIR) em vez de coordenada fixa - a posição desses elementos
+    varia mais que os botões fixos da loja (wing_shop/wings/closer, esses
+    continuam por coordenada). Depois do 2º batch, bifurca: se cancel.png
+    aparecer (popup de confirmação da compra), confirma e espera go_it.png
+    (popup de sucesso); se não aparecer, é um caminho mais curto - só
+    confirm.png e direto pro closer, sem go_it.
     """
     ranks = [r for r in RANKS_ORDER if SELL_WINGS.get(r)]
     if not ranks or not WINGS_COORDS:
@@ -600,19 +624,50 @@ def vender_wings() -> None:
     ):
         return
     _clicar_vender(c, "wings", 0.5)
-    _clicar_vender(c, "buy", 0.5)
+
+    batch_pos = _aguardar_aparecer("fim_batch", "batch.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT)
+    if not batch_pos:
+        return
+    click_pos(batch_pos, 0.5, rest=False)
+
     for rank in ranks:
-        _clicar_vender(c, f"wing_{rank}")
-    _clicar_vender(c, "buy_2", 0.5)
-    _clicar_vender(c, "confirm", 1.2)
-    _clicar_vender(c, "ok", 1.2)
+        rank_pos = _aguardar_aparecer(
+            f"wing_rank_{rank}", f"{rank}.png", base_dir=WINGS_IMG_DIR, timeout=RANK_ICON_WAIT_TIMEOUT
+        )
+        if rank_pos:
+            click_pos(rank_pos, 0.3, rest=False)
+
+    batch_pos_2 = _aguardar_aparecer("fim_batch", "batch.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT)
+    if not batch_pos_2:
+        return
+    click_pos(batch_pos_2, 0.5, rest=False)
+
+    cancel_pos = _aguardar_aparecer("fim_cancel", "cancel.png", base_dir=FIM_GAME_IMG_DIR, timeout=BRANCH_CHECK_TIMEOUT)
+
+    confirm_pos = _aguardar_aparecer("fim_confirm", "confirm.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT)
+    if confirm_pos:
+        click_pos(confirm_pos, 1.2, rest=False)
+
+    if cancel_pos:
+        go_it_pos = _aguardar_aparecer("fim_go_it", "go_it.png", base_dir=FIM_GAME_IMG_DIR, timeout=GO_IT_WAIT_TIMEOUT)
+        if go_it_pos:
+            click_pos(go_it_pos, 1.2, rest=False)
+
     _clicar_vender(c, "closer", 0.5)
     _clicar_vender(c, "closer", 0.5)
     _clicar_vender(c, "wing_shop")
 
 
 def vender_equipamento() -> None:
-    """Mesma lógica do vender_wings, fluxo de Equipamento (forja/upgrade)."""
+    """Mesma sicronia do vender_wings, fluxo de Equipamento (forja/upgrade).
+
+    Ranks reaproveitam os mesmos ícones de WINGS_IMG_DIR (o badge
+    B/A/S/SS/SSS/EX é igual em wings e equipamento). Diferente de wings:
+    não existe cancel.png aqui, só confirm.png - a checagem de
+    BRANCH_CHECK_TIMEOUT é direto em cima do confirm (se não aparecer em 1s,
+    pula pro closer sem clicar em nada; se aparecer, clica e só então vai
+    pro closer). Sem go_it - equip não tem popup de sucesso separado.
+    """
     ranks = [r for r in RANKS_ORDER if SELL_EQUIPMENT.get(r)]
     if not ranks or not EQUIP_COORDS:
         return
@@ -623,13 +678,29 @@ def vender_equipamento() -> None:
             c, "equip_forge", "forja_confirm", ["forja.png", "forja_1.png"]
         ):
             return
-        _clicar_vender(c, "upgrade", 0.5)
+
+        upgrade_pos = _aguardar_aparecer("fim_upgrade", "upgrade.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT)
+        if not upgrade_pos:
+            return
+        click_pos(upgrade_pos, 0.5, rest=False)
+
         for rank in ranks:
-            _clicar_vender(c, f"equip_{rank}")
-        _clicar_vender(c, "confirm", 3.0)
-        # equipamento não tem "ok" próprio - o diálogo é o mesmo do wings,
-        # centralizado na tela, então reaproveita a coord do wings.
-        _clicar_vender(WINGS_COORDS, "ok", 1.2)
+            rank_pos = _aguardar_aparecer(
+                f"wing_rank_{rank}", f"{rank}.png", base_dir=WINGS_IMG_DIR, timeout=RANK_ICON_WAIT_TIMEOUT
+            )
+            if rank_pos:
+                click_pos(rank_pos, 0.3, rest=False)
+
+        # "feed": mesmo papel do batch (2º clique) do wings - fecha a
+        # marcação dos ranks. Por imagem, igual batch/upgrade/confirm/go_it.
+        feed_pos = _aguardar_aparecer("fim_feed", "feed.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT)
+        if feed_pos:
+            click_pos(feed_pos, 0.5, rest=False)
+
+        confirm_pos = _aguardar_aparecer("fim_confirm", "confirm.png", base_dir=FIM_GAME_IMG_DIR, timeout=BRANCH_CHECK_TIMEOUT)
+        if confirm_pos:
+            click_pos(confirm_pos, 1.2, rest=False)
+
         _clicar_vender(c, "closer", 0.5)
         _clicar_vender(c, "closer", 0.5)
         _clicar_vender(c, "equip_forge")
@@ -649,6 +720,20 @@ def _aguardar_sumir(
             return True
         time.sleep(0.1)
     return False
+
+
+def _aguardar_aparecer(
+    cache_key: str, *path_parts: str, base_dir: str, confidence: float = 0.75, timeout: float = 5
+) -> Optional[tuple[int, int]]:
+    """Contrário do _aguardar_sumir - espera uma imagem aparecer na tela,
+    checando a cada 0.3s, devolve a posição (ou None no timeout)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        pos = locate(cache_key, *path_parts, confidence=confidence, base_dir=base_dir)
+        if pos:
+            return pos
+        time.sleep(0.3)
+    return None
 
 
 def _aguardar_endless_e_clicar(timeout: float = 60) -> bool:
