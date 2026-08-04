@@ -36,12 +36,14 @@ HIDDEN_WINDOW.wShowWindow = 0
 # ==================================================
 # TIMING CONSTANTS
 # ==================================================
-POLL_FAST = 0.08  # polling reativo (aguardando aceitar/erro) — 33Hz era exagero pra UI, 12Hz já é bem mais rápido que reação humana e derruba CPU ~3x
+POLL_FAST = 0.1  # polling reativo (aguardando aceitar/erro) — 33Hz era exagero pra UI, 12Hz já é bem mais rápido que reação humana e derruba CPU ~3x
 POLL_NORMAL = 0.03  # polling padrão do loop de lobby
 POLL_ATT = 0.05  # intervalo entre cliques no botão de atualizar
 CLICK_PAUSE = 0.03  # pausa antes de cada clique
+GAME_ENTER_PAUSE = 0.15  # pausa antes de cada clique ao entrar em game.png - precisa de mais tempo que CLICK_PAUSE pro Dota registrar hover na linha antes do click (ver comentário em step_lobby)
 FOCUS_WAIT = 0.8  # tempo para o Windows processar foco
-ATT_CYCLE_WAIT_NO_CACHE = 0.4  # espera após cada clique em ATT antes de checar game.png (sem cache - ver locate_fresh)
+ATT_CYCLE_WAIT_NO_CACHE = 0.4  # janela total de espera após cada clique em ATT pra checar game.png (sem cache - ver locate_fresh)
+ATT_CHECK_POLL = 0.2  # intervalo entre checagens de game.png dentro da janela acima - poll em vez de checar só uma vez no fim
 MENU_STEP_WAIT = 0.25  # pausa entre cliques no menu (reduzida pela metade)
 SAIR_TIMEOUT = 1.5  # timeout do popup opcional "sair" (reduzido pela metade)
 SALA_TIMEOUT = (
@@ -666,38 +668,69 @@ def _accept_loop() -> bool:
 # ==================================================
 def _refresh_until_game_appears(max_attempts: int = 240) -> Optional[tuple[int, int]]:
     """
-    Clica em ATT e confere se game.png aparece, sequencial - sem thread
-    paralela. O par clicker/observer em threads separadas brigava pelo mouse
-    (_mouse_lock) e pela mesma imagem ao mesmo tempo, e a corrida entre as
-    duas fazia perder sala.png. Loop simples: clica, espera, confere.
+    Clica em ATT enquanto uma thread separada procura game.png sem parar,
+    em paralelo. Versão antiga (clicker/observer em threads) foi trocada por
+    loop sequencial porque as duas threads brigavam pelo mouse (_mouse_lock)
+    E pela mesma imagem ao mesmo tempo, perdendo sala.png na corrida - aqui
+    só a busca roda em paralelo, quem clica (ATT/full.png) continua sendo só
+    a thread principal, sem disputa de mouse. Motivo de voltar a paralelizar:
+    o clique em ATT reseta/pisca a lista, e um poll preso ao ritmo do clique
+    perde o instante exato em que game.png renderiza - a busca desacoplada do
+    clique acha assim que aparece, não importa quem (bot ou o próprio usuário
+    clicando por cima) estava batendo ATT.
 
     att.png/game.png usam locate_fresh (sem cache) - game.png é a linha do
     lobby buscado, muda de posição a cada busca, cache aqui fazia o bot ficar
     só atualizando sem nunca entrar (ver locate_fresh).
     """
+    pos = locate_fresh("game.png", confidence=0.7)
+    if pos:
+        return pos
+
     att = locate_fresh("att.png")
     if not att:
         return None
 
     save_status(current_pw=current_password(), password_deadline=0.0)
 
-    for _ in range(max_attempts):
-        safe_click(att, pause=POLL_ATT)
-        time.sleep(ATT_CYCLE_WAIT_NO_CACHE)
+    found: list[Optional[tuple[int, int]]] = [None]
+    stop_event = threading.Event()
 
-        pos = locate_fresh("game.png", confidence=0.7)
-        if pos:
-            return pos
+    def _watch_game() -> None:
+        while not stop_event.is_set():
+            pos = locate_fresh("game.png", confidence=0.7)
+            if pos:
+                found[0] = pos
+                stop_event.set()
+                return
+            time.sleep(ATT_CHECK_POLL)
 
-        # Se aparecer 'full.png' (sala cheia), clica pra fechar o aviso e segue.
-        full_pop = locate("full.png", confidence=0.70)
-        if full_pop:
-            safe_click(full_pop, pause=0.1)
-            time.sleep(0.2)
+    watcher = threading.Thread(target=_watch_game, daemon=True)
+    watcher.start()
 
-        att = locate_fresh("att.png") or att
+    try:
+        for _ in range(max_attempts):
+            if stop_event.is_set():
+                break
 
-    return None
+            safe_click(att, pause=POLL_ATT)
+            time.sleep(ATT_CHECK_POLL)
+
+            if stop_event.is_set():
+                break
+
+            # Se aparecer 'full.png' (sala cheia), clica pra fechar o aviso e segue.
+            full_pop = locate("full.png", confidence=0.70)
+            if full_pop:
+                safe_click(full_pop, pause=0.1)
+                time.sleep(0.2)
+
+            att = locate_fresh("att.png") or att
+    finally:
+        stop_event.set()
+        watcher.join(timeout=1.0)
+
+    return found[0]
 
 
 # ==================================================
@@ -769,10 +802,15 @@ def step_lobby() -> None:
         # capturada. pyautogui.doubleClick() manda um evento de double-click
         # de SO que o Dota às vezes não reconhece (mouse chega mas não entra
         # na sala) - cliques separados replicam o que já funcionava.
-        pyautogui.moveTo(game[0], game[1])
-        time.sleep(CLICK_PAUSE)
+        # moveTo sem duration teleporta o cursor (sem evento de mouse-move de
+        # verdade) e o CLICK_PAUSE de 0.03s some quase todo no overhead de
+        # pyautogui.PAUSE - sobra ~0.008s real antes do clique, cedo demais
+        # pro Dota registrar hover na linha antes do click (clica "no vazio").
+        # Duration força movimento real; pausa maior dá tempo do hover render.
+        pyautogui.moveTo(game[0], game[1], duration=0.1)
+        time.sleep(GAME_ENTER_PAUSE)
         pyautogui.click()
-        time.sleep(CLICK_PAUSE)
+        time.sleep(GAME_ENTER_PAUSE)
         pyautogui.click()
 
         inside_room = True

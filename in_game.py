@@ -336,11 +336,19 @@ def descansar_mouse() -> None:
     except Exception:
         pass
 
-def _click_at(x: int, y: int, right: bool = False, delay: float = 0.1, rest: bool = True) -> None:
+def _click_at(
+    x: int,
+    y: int,
+    right: bool = False,
+    delay: float = 0.1,
+    rest: bool = True,
+    pre_delay: float = 0.05,
+    move_duration: float = 0.0,
+) -> None:
     try:
         with _mouse_lock:
-            pyautogui.moveTo(x, y)
-            time.sleep(0.05)
+            pyautogui.moveTo(x, y, duration=move_duration)
+            time.sleep(pre_delay)
             if right:
                 pyautogui.rightClick()
             else:
@@ -718,7 +726,11 @@ def disable_xp() -> None:
     if not NO_XP or XP_BUTTON_BASE is None:
         return
     x, y = scale_coord(XP_BUTTON_BASE)
-    _click_at(x, y, right=True, delay=0.2)
+    # pre_delay/move_duration maiores que o padrão de _click_at - mesmo
+    # problema achado no clique de entrar em game.png (lobby.py): moveTo sem
+    # duration teleporta, e o pre_delay padrão (0.05s) é curto demais pro
+    # jogo registrar hover antes do click direito cair.
+    _click_at(x, y, right=True, delay=0.2, pre_delay=0.15, move_duration=0.08)
 
 def ativar_gold() -> None:
     """Mesmo esquema do disable_xp - clique direito na coordenada
@@ -726,7 +738,7 @@ def ativar_gold() -> None:
     if not GOLD or ON_GOLD_BUTTON_BASE is None:
         return
     x, y = scale_coord(ON_GOLD_BUTTON_BASE)
-    _click_at(x, y, right=True, delay=0.2)
+    _click_at(x, y, right=True, delay=0.2, pre_delay=0.15, move_duration=0.08)
 
 def wait_for_match_start(poll: float = 2.0, timeout: Optional[float] = None) -> bool:
     started_at = time.time()

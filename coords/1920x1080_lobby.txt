@@ -1,5 +1,7 @@
-fim.png=959,765
-lista.png=884,84
-lobby.png=918,834
 buscar.png=470,832
 200.png=376,164
+lista.png=881,83
+lobby.png=920,834
+ok.png=1008,604
+aceitar.png=956,514
+fim.png=960,763
