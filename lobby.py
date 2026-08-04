@@ -810,7 +810,7 @@ def step_lobby() -> None:
             _proceed_to_filter()
             continue
 
-        # Game encontrado → dois cliques simples em sequência na posição já
+        # Game encontrado → quatro cliques simples em sequência na posição já
         # capturada. pyautogui.doubleClick() manda um evento de double-click
         # de SO que o Dota às vezes não reconhece (mouse chega mas não entra
         # na sala) - cliques separados replicam o que já funcionava.
@@ -818,11 +818,19 @@ def step_lobby() -> None:
         # verdade) e o CLICK_PAUSE de 0.03s some quase todo no overhead de
         # pyautogui.PAUSE - sobra ~0.008s real antes do clique, cedo demais
         # pro Dota registrar hover na linha antes do click (clica "no vazio").
-        # Duration força movimento real; pausa maior dá tempo do hover render.
+        # Duration força movimento real; pausa maior antes do 1º clique dá
+        # tempo do hover render. Do 2º ao 4º clique o hover já foi
+        # registrado, então usa CLICK_PAUSE (bem mais apertado) só pra
+        # garantir que o Dota separe os eventos - 4 cliques quase juntos
+        # cobrem o caso de o 1º/2º não pegar sem esperar outro ciclo de ATT.
         pyautogui.moveTo(game[0], game[1], duration=0.1)
         time.sleep(GAME_ENTER_PAUSE)
         pyautogui.click()
-        time.sleep(GAME_ENTER_PAUSE)
+        time.sleep(CLICK_PAUSE)
+        pyautogui.click()
+        time.sleep(CLICK_PAUSE)
+        pyautogui.click()
+        time.sleep(CLICK_PAUSE)
         pyautogui.click()
 
         inside_room = True
