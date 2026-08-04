@@ -4,7 +4,6 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Optional
 
 import pyautogui
 
@@ -40,7 +39,7 @@ POLL_FAST = 0.1  # polling reativo (aguardando aceitar/erro) — 33Hz era exager
 POLL_NORMAL = 0.03  # polling padrão do loop de lobby
 POLL_ATT = 0.05  # intervalo entre cliques no botão de atualizar
 CLICK_PAUSE = 0.03  # pausa antes de cada clique
-GAME_ENTER_PAUSE = 0.15  # pausa antes de cada clique ao entrar em game.png - precisa de mais tempo que CLICK_PAUSE pro Dota registrar hover na linha antes do click (ver comentário em step_lobby)
+GAME_ENTER_PAUSE = 0.3  # pausa antes de cada clique ao entrar em game.png - precisa de mais tempo que CLICK_PAUSE pro Dota registrar hover na linha antes do click (ver comentário em step_lobby)
 FOCUS_WAIT = 0.8  # tempo para o Windows processar foco
 ATT_CYCLE_WAIT_NO_CACHE = 0.4  # janela total de espera após cada clique em ATT pra checar game.png (sem cache - ver locate_fresh)
 ATT_CHECK_POLL = 0.2  # intervalo entre checagens de game.png dentro da janela acima - poll em vez de checar só uma vez no fim
@@ -373,8 +372,7 @@ def _cache_write() -> None:
         tmp_file = CACHE_FILE + ".tmp"
         try:
             with open(tmp_file, "w", encoding="utf-8") as f:
-                for name, (cx, cy) in _coord_cache.items():
-                    f.write(f"{name}={cx},{cy}\n")
+                f.writelines(f"{name}={cx},{cy}\n" for name, (cx, cy) in _coord_cache.items())
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_file, CACHE_FILE)
@@ -406,8 +404,8 @@ Region = tuple[int, int, int, int]
 def _locate_raw(
     name: str,
     confidence: float,
-    region: Optional[Region] = None,
-) -> Optional[tuple[int, int]]:
+    region: Region | None = None,
+) -> tuple[int, int] | None:
     try:
         return pyautogui.locateCenterOnScreen(
             _img_path(name),
@@ -418,7 +416,7 @@ def _locate_raw(
         return None
 
 
-def locate(name: str, confidence: float = 0.7) -> Optional[tuple[int, int]]:
+def locate(name: str, confidence: float = 0.7) -> tuple[int, int] | None:
     cached = _coord_cache.get(name)
 
     if cached is not None:
@@ -442,7 +440,7 @@ def locate(name: str, confidence: float = 0.7) -> Optional[tuple[int, int]]:
     return pos
 
 
-def locate_fresh(name: str, confidence: float = 0.7) -> Optional[tuple[int, int]]:
+def locate_fresh(name: str, confidence: float = 0.7) -> tuple[int, int] | None:
     """locate() sem cache - sempre varre a tela inteira. Usado só no loop de
     ATT (_refresh_until_game_appears): game.png é a linha do lobby buscado,
     a posição muda a cada busca (nº de resultados, scroll) - uma coordenada
@@ -461,7 +459,7 @@ def wait_for(
     name: str,
     confidence: float = 0.7,
     timeout: float = 60,
-) -> Optional[tuple[int, int]]:
+) -> tuple[int, int] | None:
     deadline = time.time() + timeout
     while time.time() < deadline:
         pos = locate(name, confidence)
@@ -484,9 +482,14 @@ def wait_disappear(
     return False
 
 
-def safe_click(pos: Optional[tuple[int, int]], pause: float = CLICK_PAUSE) -> bool:
+def safe_click(pos: tuple[int, int] | None, pause: float = CLICK_PAUSE, duration: float = 0.0) -> bool:
     if pos:
-        pyautogui.moveTo(pos[0], pos[1])
+        # duration=0 teleporta o cursor (sem evento de mouse-move de verdade) -
+        # em telas do Dota que exigem hover antes do click (ver comentário em
+        # step_lobby, dois cliques em game.png), isso faz o clique "cair no
+        # vazio". Callers que clicam em elementos sensíveis a hover (ex:
+        # aceitar.png) devem passar duration>0.
+        pyautogui.moveTo(pos[0], pos[1], duration=duration)
         time.sleep(pause)
         pyautogui.click()
         return True
@@ -666,7 +669,7 @@ def _accept_loop() -> bool:
 # ==================================================
 # LOOP DE ATT INTELIGENTE
 # ==================================================
-def _refresh_until_game_appears(max_attempts: int = 240) -> Optional[tuple[int, int]]:
+def _refresh_until_game_appears(max_attempts: int = 240) -> tuple[int, int] | None:
     """
     Clica em ATT enquanto uma thread separada procura game.png sem parar,
     em paralelo. Versão antiga (clicker/observer em threads) foi trocada por
@@ -693,7 +696,7 @@ def _refresh_until_game_appears(max_attempts: int = 240) -> Optional[tuple[int, 
 
     save_status(current_pw=current_password(), password_deadline=0.0)
 
-    found: list[Optional[tuple[int, int]]] = [None]
+    found: list[tuple[int, int] | None] = [None]
     stop_event = threading.Event()
 
     def _watch_game() -> None:
@@ -709,7 +712,7 @@ def _refresh_until_game_appears(max_attempts: int = 240) -> Optional[tuple[int, 
     watcher.start()
 
     try:
-        for _ in range(max_attempts):
+        for i in range(max_attempts):
             if stop_event.is_set():
                 break
 
@@ -725,7 +728,13 @@ def _refresh_until_game_appears(max_attempts: int = 240) -> Optional[tuple[int, 
                 safe_click(full_pop, pause=0.1)
                 time.sleep(0.2)
 
-            att = locate_fresh("att.png") or att
+            # att.png não muda de posição dentro do loop (só entre resoluções
+            # diferentes) - refazer o full-scan toda iteração é CPU jogada
+            # fora, competindo com o watcher que precisa achar game.png rápido.
+            # Reconfirma a cada 3 tentativas só pra cobrir o caso raro do
+            # botão sumir/mudar (ex: popup por cima).
+            if i % 3 == 0:
+                att = locate_fresh("att.png") or att
     finally:
         stop_event.set()
         watcher.join(timeout=1.0)
@@ -761,7 +770,10 @@ def step_lobby() -> None:
 
             aceitar = locate("aceitar.png")
             if aceitar:
-                safe_click(aceitar)
+                # mesmo motivo do duplo clique em game.png (ver step_lobby):
+                # sem duration o cursor teleporta e o Dota não registra hover
+                # antes do click, fazendo o "aceitar" às vezes não pegar.
+                safe_click(aceitar, pause=GAME_ENTER_PAUSE, duration=0.1)
                 completed = _accept_loop()
                 if completed:
                     return
