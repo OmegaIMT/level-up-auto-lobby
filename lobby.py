@@ -49,7 +49,7 @@ SALA_TIMEOUT = (
     170  # sala.png travada (sem erro/aceitar) por mais que isso reinicia o dota
 )
 FIM_TIMEOUT = (
-    240  # fim.png não aparece (aceitar travado) por mais que isso reinicia o dota
+    360  # fim.png não aparece (aceitar travado) por mais que isso reinicia o dota
 )
 DOTA_OPEN_TIMEOUT = 90  # tempo max esperando a janela do Dota 2 aparecer após steam://run/570
 DOTA_RETRY_INTERVAL = 15  # reenvia steam://run/570 se a janela ainda não apareceu
