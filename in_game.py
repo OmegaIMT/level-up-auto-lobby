@@ -26,7 +26,7 @@ HIDDEN_WINDOW.dwFlags     |= subprocess.STARTF_USESHOWWINDOW
 HIDDEN_WINDOW.wShowWindow  = 0
 
 CONFIG_FILE = "config.json"
-LOG_FILE = "bot_log.txt"  # mesmo arquivo do lobby.py/fim_game.py - console fica oculto (ShowWindow 0)
+LOG_FILE = "in_game_log.txt"  # arquivo próprio (era bot_log.txt compartilhado) - console fica oculto (ShowWindow 0)
 
 def _log(msg: str) -> None:
     line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] in_game: {msg}"
@@ -389,7 +389,7 @@ BASE_RES = "1920x1080"
 BASE_WIDTH, BASE_HEIGHT = (int(v) for v in BASE_RES.split("x"))
 BASE_COORDS = COORDS_ALL.get(BASE_RES, {})
 
-# Bloco com coordenadas reais da resolução atual (ex: "3440x1440"), se
+# Bloco com coordenadas reais da resolução atual (ex: "1600x900"), se
 # existir em coords_base_in_game.json. Quando existe, usamos direto - sem
 # fórmula, sem chute. Dota renderiza em pixels reais, não segue a escala de
 # exibição do Windows (100%/125%/...) - a mesma coordenada serve pra

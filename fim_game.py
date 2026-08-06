@@ -27,7 +27,7 @@ HIDDEN_WINDOW.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 HIDDEN_WINDOW.wShowWindow = 0
 
 CONFIG_FILE = "config.json"
-LOG_FILE = "bot_log.txt"  # mesmo arquivo do lobby.py - console fica oculto (ShowWindow 0), sem isso não dá pra ver nada
+LOG_FILE = "fim_game_log.txt"  # arquivo próprio (era bot_log.txt compartilhado) - console fica oculto (ShowWindow 0), sem isso não dá pra ver nada
 
 
 def _log(msg: str) -> None:
@@ -351,30 +351,51 @@ def _locate_raw(
 
 
 def locate(
-    cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir: str = IMG_DIR
+    cache_key: str,
+    *path_parts: str,
+    confidence: float = 0.75,
+    base_dir: str = IMG_DIR,
+    use_cache: bool = True,
+    region: Optional[Region] = None,
 ) -> Optional[tuple[int, int]]:
+    """use_cache=False pula a região restrita ao redor da posição cacheada e
+    procura na tela inteira direto - usado nos popups do fim de wings
+    (cancel/confirm/go_it) porque a posição deles varia e a busca por
+    região tava dando falso negativo, deixando de clicar.
+
+    region: recorte fixo (left, top, width, height) pra travar a busca numa
+    faixa da tela - usado nos ícones de rank (b/a/s/ss/sss/ex), que sem
+    isso às vezes batiam no badge de rank do próprio item equipado (linha
+    de cima) em vez do checkbox de seleção (linha de baixo). Ignora cache
+    quando informado - região já é fixa o bastante."""
     full_path = os.path.join(base_dir, *path_parts)
     if not os.path.exists(full_path):
         return None
 
-    cached = _coord_cache.get(cache_key)
-    if cached is not None:
-        cx, cy = cached
-        region: Region = (
-            max(0, cx - CACHE_MARGIN),
-            max(0, cy - CACHE_MARGIN),
-            CACHE_MARGIN * 2,
-            CACHE_MARGIN * 2,
-        )
+    if region is not None:
         pos = _locate_raw(full_path, confidence, region=region)
-        if pos:
-            _update_debug(cache_key, True)
-            return pos
-        _cache_invalidate(cache_key)
+        _update_debug(cache_key, pos is not None)
+        return pos
+
+    if use_cache:
+        cached = _coord_cache.get(cache_key)
+        if cached is not None:
+            cx, cy = cached
+            cache_region: Region = (
+                max(0, cx - CACHE_MARGIN),
+                max(0, cy - CACHE_MARGIN),
+                CACHE_MARGIN * 2,
+                CACHE_MARGIN * 2,
+            )
+            pos = _locate_raw(full_path, confidence, region=cache_region)
+            if pos:
+                _update_debug(cache_key, True)
+                return pos
+            _cache_invalidate(cache_key)
 
     pos = _locate_raw(full_path, confidence)
     _update_debug(cache_key, pos is not None)
-    if pos:
+    if pos and use_cache:
         _cache_save_entry(cache_key, pos[0], pos[1])
     return pos
 
@@ -387,34 +408,39 @@ def _locate_box_raw(path: str, confidence: float, region: Optional[Region] = Non
 
 
 def locate_box(
-    cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir: str = IMG_DIR
+    cache_key: str,
+    *path_parts: str,
+    confidence: float = 0.75,
+    base_dir: str = IMG_DIR,
+    use_cache: bool = True,
 ):
     """Igual locate(), mas devolve a caixa (left, top, width, height) em vez
     do centro - usado quando o clique real não é no centro do template e
     precisa escalar com o tamanho encontrado (ex: dog.png, ver
-    DOG_CLICK_Y_RATIO)."""
+    DOG_CLICK_Y_RATIO). use_cache=False: ver locate()."""
     full_path = os.path.join(base_dir, *path_parts)
     if not os.path.exists(full_path):
         return None
 
-    cached = _coord_cache.get(cache_key)
-    if cached is not None:
-        cx, cy = cached
-        region: Region = (
-            max(0, cx - CACHE_MARGIN),
-            max(0, cy - CACHE_MARGIN),
-            CACHE_MARGIN * 2,
-            CACHE_MARGIN * 2,
-        )
-        box = _locate_box_raw(full_path, confidence, region=region)
-        if box:
-            _update_debug(cache_key, True)
-            return box
-        _cache_invalidate(cache_key)
+    if use_cache:
+        cached = _coord_cache.get(cache_key)
+        if cached is not None:
+            cx, cy = cached
+            region: Region = (
+                max(0, cx - CACHE_MARGIN),
+                max(0, cy - CACHE_MARGIN),
+                CACHE_MARGIN * 2,
+                CACHE_MARGIN * 2,
+            )
+            box = _locate_box_raw(full_path, confidence, region=region)
+            if box:
+                _update_debug(cache_key, True)
+                return box
+            _cache_invalidate(cache_key)
 
     box = _locate_box_raw(full_path, confidence)
     _update_debug(cache_key, box is not None)
-    if box:
+    if box and use_cache:
         _cache_save_entry(
             cache_key, box.left + box.width // 2, box.top + box.height // 2
         )
@@ -540,11 +566,12 @@ def _rodar_com_retry_bonus(fluxo) -> None:
     `fluxo` roda, o popup atrapalhou os cliques de coordenada fixa - refaz o
     fluxo inteiro do zero, até BONUS_INTERRUPT_MAX_RETRY vezes. Não usado
     pro ativar_endless (ver processar_fim_partida)."""
-    for _ in range(BONUS_INTERRUPT_MAX_RETRY):
+    for tentativa in range(BONUS_INTERRUPT_MAX_RETRY):
         _bonus_interrupt.clear()
         fluxo()
         if not _bonus_interrupt.is_set():
             return
+        _log(f"_rodar_com_retry_bonus: bonus.png interrompeu {fluxo.__name__} (tentativa {tentativa + 1}/{BONUS_INTERRUPT_MAX_RETRY}) - refazendo do zero")
 
 
 def _clicar_vender(
@@ -596,24 +623,46 @@ def _abrir_loja_com_confirmacao(
 
 BATCH_WAIT_TIMEOUT = 10.0    # esperando batch.png aparecer (abre/confirma a lista)
 RANK_ICON_WAIT_TIMEOUT = 5.0  # esperando o ícone de cada rank marcado aparecer - wings e equipamento reaproveitam os mesmos ícones (WINGS_IMG_DIR)
-BRANCH_CHECK_TIMEOUT = 1.0   # só decide qual ramo do fluxo seguir (cancel em wings / confirm em equip), não é uma espera "de verdade"
+BRANCH_CHECK_TIMEOUT = 3.0   # só decide qual ramo do fluxo seguir (cancel em wings / confirm em equip), não é uma espera "de verdade"
 GO_IT_WAIT_TIMEOUT = 10.0    # esperando o popup de sucesso (go_it.png) aparecer - só wings
+
+
+def _rank_row_region(coords: dict, prefix: str) -> Optional[Region]:
+    """Faixa horizontal (Y) onde fica a linha de checkbox de rank
+    (b...ex), largura da tela inteira - usa só o Y de {prefix}_b/
+    {prefix}_ex do coords_base_vender.json como referência (o X desses
+    campos é de uma captura antiga e não bate mais com o jogo hoje, mas o Y
+    da linha se manteve). Sem essa restrição, o locate na tela inteira às
+    vezes batia no badge de rank do item equipado (bem mais acima, painel
+    de cima) em vez do checkbox de seleção da linha de baixo - mesmo ícone,
+    lugar errado."""
+    lo = coords.get(f"{prefix}_b")
+    hi = coords.get(f"{prefix}_ex")
+    ys = [p[1] for p in (lo, hi) if p]
+    if not ys:
+        return None
+    y_center = sum(ys) / len(ys)
+    margin = CACHE_MARGIN * 2
+    top = max(0, int(y_center - margin))
+    return (0, top, _RES_WIDTH, margin * 2)
 
 
 def vender_wings() -> None:
     """
-    Abre a loja de Wings, abre a lista de itens (wings) uma vez só, marca
+    Abre a loja de Wings, abre a lista de itens (buy) uma vez só, marca
     (clica) cada rank selecionado em sequência e só então confirma a compra
-    inteira de uma vez (batch/confirm/go_it) - não reabre a lista nem
+    inteira de uma vez (buy_2/confirm/go_it) - não reabre a lista nem
     confirma por rank individualmente.
 
-    A partir do batch.png o fluxo é por imagem (FIM_GAME_IMG_DIR/
-    WINGS_IMG_DIR) em vez de coordenada fixa - a posição desses elementos
-    varia mais que os botões fixos da loja (wing_shop/wings/closer, esses
-    continuam por coordenada). Depois do 2º batch, bifurca: se cancel.png
-    aparecer (popup de confirmação da compra), confirma e espera go_it.png
-    (popup de sucesso); se não aparecer, é um caminho mais curto - só
-    confirm.png e direto pro closer, sem go_it.
+    O botão "Batch Dismantle" (abre/confirma a lista) voltou a ser por
+    coordenada fixa (buy/buy_2 do coords_base_vender.json) - imagem
+    (batch.png) parou de bater o confidence e travava o fluxo. Só
+    cancel/confirm/go_it continuam por imagem (FIM_GAME_IMG_DIR), que é
+    onde a posição realmente varia. Dois fluxos possíveis depois do 2º
+    buy: 1) cancel.png aparece (dentro de BRANCH_CHECK_TIMEOUT) -> clica
+    confirm -> espera e clica go_it (popup de sucesso "Got it"). 2)
+    cancel.png não aparece -> clica confirm -> ignora go_it, direto pro
+    closer.
     """
     ranks = [r for r in RANKS_ORDER if SELL_WINGS.get(r)]
     if not ranks or not WINGS_COORDS:
@@ -624,32 +673,28 @@ def vender_wings() -> None:
     ):
         return
     _clicar_vender(c, "wings", 0.5)
+    _clicar_vender(c, "buy", 0.5)
 
-    batch_pos = _aguardar_aparecer("fim_batch", "batch.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT)
-    if not batch_pos:
-        return
-    click_pos(batch_pos, 0.5, rest=False)
-
+    rank_region = _rank_row_region(c, "wing")
     for rank in ranks:
         rank_pos = _aguardar_aparecer(
-            f"wing_rank_{rank}", f"{rank}.png", base_dir=WINGS_IMG_DIR, timeout=RANK_ICON_WAIT_TIMEOUT
+            f"wing_rank_{rank}", f"{rank}.png", base_dir=WINGS_IMG_DIR, timeout=RANK_ICON_WAIT_TIMEOUT, region=rank_region
         )
         if rank_pos:
             click_pos(rank_pos, 0.3, rest=False)
 
-    batch_pos_2 = _aguardar_aparecer("fim_batch", "batch.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT)
-    if not batch_pos_2:
-        return
-    click_pos(batch_pos_2, 0.5, rest=False)
+    _clicar_vender(c, "buy_2", 0.5)
 
-    cancel_pos = _aguardar_aparecer("fim_cancel", "cancel.png", base_dir=FIM_GAME_IMG_DIR, timeout=BRANCH_CHECK_TIMEOUT)
+    cancel_pos = _aguardar_aparecer("fim_cancel", "cancel.png", base_dir=FIM_GAME_IMG_DIR, timeout=BRANCH_CHECK_TIMEOUT, use_cache=False)
+    _log(f"vender_wings: cancel.png {'achou ' + str(cancel_pos) if cancel_pos else 'NAO achou'}")
 
-    confirm_pos = _aguardar_aparecer("fim_confirm", "confirm.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT)
+    confirm_pos = _aguardar_aparecer("fim_confirm", "confirm.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT, use_cache=False)
     if confirm_pos:
         click_pos(confirm_pos, 1.2, rest=False)
 
     if cancel_pos:
-        go_it_pos = _aguardar_aparecer("fim_go_it", "go_it.png", base_dir=FIM_GAME_IMG_DIR, timeout=GO_IT_WAIT_TIMEOUT)
+        go_it_pos = _aguardar_aparecer("fim_go_it", "go_it.png", base_dir=FIM_GAME_IMG_DIR, timeout=GO_IT_WAIT_TIMEOUT, use_cache=False)
+        _log(f"vender_wings: go_it.png {'achou ' + str(go_it_pos) if go_it_pos else 'NAO achou'}")
         if go_it_pos:
             click_pos(go_it_pos, 1.2, rest=False)
 
@@ -677,27 +722,32 @@ def vender_equipamento() -> None:
         if not _abrir_loja_com_confirmacao(
             c, "equip_forge", "forja_confirm", ["forja.png", "forja_1.png"]
         ):
+            _log("vender_equipamento: loja (forja.png/forja_1.png) NAO abriu - abortando")
             return
 
-        upgrade_pos = _aguardar_aparecer("fim_upgrade", "upgrade.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT)
+        upgrade_pos = _aguardar_aparecer("fim_upgrade", "upgrade.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT, use_cache=False)
+        _log(f"vender_equipamento: upgrade.png {'achou ' + str(upgrade_pos) if upgrade_pos else 'NAO achou'}")
         if not upgrade_pos:
             return
         click_pos(upgrade_pos, 0.5, rest=False)
 
+        rank_region = _rank_row_region(c, "equip")
         for rank in ranks:
             rank_pos = _aguardar_aparecer(
-                f"wing_rank_{rank}", f"{rank}.png", base_dir=WINGS_IMG_DIR, timeout=RANK_ICON_WAIT_TIMEOUT
+                f"wing_rank_{rank}", f"{rank}.png", base_dir=WINGS_IMG_DIR, timeout=RANK_ICON_WAIT_TIMEOUT, region=rank_region
             )
             if rank_pos:
                 click_pos(rank_pos, 0.3, rest=False)
 
         # "feed": mesmo papel do batch (2º clique) do wings - fecha a
         # marcação dos ranks. Por imagem, igual batch/upgrade/confirm/go_it.
-        feed_pos = _aguardar_aparecer("fim_feed", "feed.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT)
+        feed_pos = _aguardar_aparecer("fim_feed", "feed.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT, use_cache=False)
+        _log(f"vender_equipamento: feed.png {'achou ' + str(feed_pos) if feed_pos else 'NAO achou'}")
         if feed_pos:
             click_pos(feed_pos, 0.5, rest=False)
 
-        confirm_pos = _aguardar_aparecer("fim_confirm", "confirm.png", base_dir=FIM_GAME_IMG_DIR, timeout=BRANCH_CHECK_TIMEOUT)
+        confirm_pos = _aguardar_aparecer("fim_confirm", "confirm.png", base_dir=FIM_GAME_IMG_DIR, timeout=BRANCH_CHECK_TIMEOUT, use_cache=False)
+        _log(f"vender_equipamento: confirm.png {'achou ' + str(confirm_pos) if confirm_pos else 'NAO achou'}")
         if confirm_pos:
             click_pos(confirm_pos, 1.2, rest=False)
 
@@ -723,13 +773,19 @@ def _aguardar_sumir(
 
 
 def _aguardar_aparecer(
-    cache_key: str, *path_parts: str, base_dir: str, confidence: float = 0.75, timeout: float = 5
+    cache_key: str,
+    *path_parts: str,
+    base_dir: str,
+    confidence: float = 0.70,
+    timeout: float = 5,
+    use_cache: bool = True,
+    region: Optional[Region] = None,
 ) -> Optional[tuple[int, int]]:
     """Contrário do _aguardar_sumir - espera uma imagem aparecer na tela,
     checando a cada 0.3s, devolve a posição (ou None no timeout)."""
     deadline = time.time() + timeout
     while time.time() < deadline:
-        pos = locate(cache_key, *path_parts, confidence=confidence, base_dir=base_dir)
+        pos = locate(cache_key, *path_parts, confidence=confidence, base_dir=base_dir, use_cache=use_cache, region=region)
         if pos:
             return pos
         time.sleep(0.3)
@@ -746,18 +802,23 @@ def _aguardar_endless_e_clicar(timeout: float = 60) -> bool:
     while True:
         pos = locate("endless_ingame", "endless.png", confidence=0.75)
         if pos:
+            _log(f"_aguardar_endless_e_clicar: endless.png achou {pos} - clicando")
             click_pos(pos, delay_after=ENDLESS_CLICK_DELAY, rest=False)
             if _aguardar_sumir(
                 "endless_ingame", "endless.png", confidence=0.75, timeout=ENDLESS_DISAPPEAR_TIMEOUT
             ):
                 return True
+            _log("_aguardar_endless_e_clicar: endless.png NAO sumiu depois do clique - tentando de novo")
             continue
         if time.time() - started > timeout:
+            _log(f"_aguardar_endless_e_clicar: TIMEOUT ({timeout}s) - endless.png nunca achou")
             return False
         time.sleep(0.5)
 
 
 ENDLESS_MAX_TENTATIVAS = 5
+ENDLESS_MAP_LOAD_WAIT = 5.0  # espera fixa depois do clique no hero, antes de procurar o dog - dá tempo da transição/loading pro mapa Endless renderizar
+DOG_WAIT_TIMEOUT = 8.0       # por tentativa (era 3s - curto demais, dog ainda nem tinha aparecido)
 
 
 def _dog_templates() -> list[str]:
@@ -773,19 +834,25 @@ def _aguardar_dog_e_clicar(timeout: float = 3) -> bool:
     aparecer e clica abaixo dele, na montaria/npc - posição de clique fixa
     (coord) não funciona porque o mapa muda de lugar (bug do próprio jogo).
     Offset escala com o tamanho do template achado (locate_box), não é
-    pixel fixo - acompanha resolução/zoom do mapa."""
+    pixel fixo - acompanha resolução/zoom do mapa. use_cache=False pelo
+    mesmo motivo - região cacheada de uma posição antiga do mapa não serve
+    pra próxima (mapa mudou de lugar), então busca tela toda sempre.
+    Confidence mais baixo (0.65) porque o label é um texto pequeno,
+    sensível a variação de zoom/AA da câmera."""
     started = time.time()
     while True:
         for name in _dog_templates():
-            box = locate_box("dog_ingame", name, confidence=0.75)
+            box = locate_box(f"dog_ingame_{name}", name, confidence=0.65, use_cache=False)
             if box:
                 target = (
                     box.left + box.width // 2,
                     box.top + int(box.height * DOG_CLICK_Y_RATIO),
                 )
+                _log(f"_aguardar_dog_e_clicar: {name} achou (box={box}) - clicando em {target}")
                 click_pos(target, delay_after=ENDLESS_CLICK_DELAY, rest=False)
                 return True
         if time.time() - started > timeout:
+            _log(f"_aguardar_dog_e_clicar: TIMEOUT ({timeout}s) - nenhum dog*.png achou")
             return False
         time.sleep(0.5)
 
@@ -810,27 +877,24 @@ def ativar_endless() -> None:
                 pyautogui.moveTo(*SLOT_20)
             except Exception:
                 pass
-    for _ in range(ENDLESS_MAX_TENTATIVAS):
-        if _aguardar_dog_e_clicar() and _aguardar_endless_e_clicar(timeout=3):
+    # Troca de tela pro mapa Endless (teleporte/loading) demora - dando só
+    # ~3s x 5 tentativas (15s) o dog nunca tinha nem renderizado ainda.
+    # Espera fixa aqui + timeout bem maior por tentativa cobre a demora.
+    time.sleep(ENDLESS_MAP_LOAD_WAIT)
+    for tentativa in range(ENDLESS_MAX_TENTATIVAS):
+        if _aguardar_dog_e_clicar(timeout=DOG_WAIT_TIMEOUT) and _aguardar_endless_e_clicar(timeout=3):
+            _log(f"ativar_endless: mapa selecionado/confirmado na tentativa {tentativa + 1}")
             break
+    else:
+        _log(f"ativar_endless: ESGOTOU {ENDLESS_MAX_TENTATIVAS} tentativas sem selecionar/confirmar o mapa")
     time.sleep(3)
     try:
         pyautogui.press("d")
+        _log("ativar_endless: 'd' pressionado")
     except Exception:
-        pass
-    _aguardar_endless_e_clicar()
-
-
-def aguardar_count_reaparecer(timeout: float = 60) -> bool:
-    """Sincroniza a troca entre wings->equipamento: espera a tela voltar
-    pro normal (count.png visível de novo) antes de abrir o próximo fluxo."""
-    started = time.time()
-    while True:
-        if locate("count", "count.png", confidence=0.70):
-            return True
-        if time.time() - started > timeout:
-            return False
-        time.sleep(0.5)
+        _log("ativar_endless: EXCEÇÃO ao pressionar 'd':\n" + traceback.format_exc())
+    if not _aguardar_endless_e_clicar():
+        _log("ativar_endless: 2º endless.png (confirmar entrada) nunca achou depois do 'd'")
 
 
 def disconnect_and_relaunch() -> None:
@@ -907,10 +971,10 @@ def processar_fim_partida() -> None:
     watchdog.start()
 
     # Venda: wings primeiro, depois equipamento - só entra na lista quem
-    # tem pelo menos um rank marcado no painel "Vender" do start.py. Entre
-    # um fluxo e outro espera count.png reaparecer (tela normalizou) antes
-    # de abrir o próximo; se só um (ou nenhum) tá marcado não precisa
-    # esperar nada extra.
+    # tem pelo menos um rank marcado no painel "Vender" do start.py. Segue
+    # direto de um fluxo pro próximo (wings -> equipamento -> endless), sem
+    # esperar count.png reaparecer entre eles - cada fluxo já fecha a loja
+    # sozinho (closer/wing_shop no fim) antes de devolver.
     fluxos_venda = []
     if any(SELL_WINGS.get(r) for r in RANKS_ORDER):
         fluxos_venda.append(vender_wings)
@@ -919,15 +983,13 @@ def processar_fim_partida() -> None:
     if ENDLESS:
         fluxos_venda.append(ativar_endless)
 
-    for i, fluxo in enumerate(fluxos_venda):
+    for fluxo in fluxos_venda:
         _log(f"iniciando fluxo: {fluxo.__name__}")
         if fluxo is ativar_endless:
             fluxo()
         else:
             _rodar_com_retry_bonus(fluxo)
         _log(f"fluxo concluído: {fluxo.__name__}")
-        if i < len(fluxos_venda) - 1:
-            aguardar_count_reaparecer()
 
     # Espera a próxima partida começar (fonte.png) - sem timeout aqui, quem
     # cuida do limite de tempo total é o watchdog que já subiu lá em cima.

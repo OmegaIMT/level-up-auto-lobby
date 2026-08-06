@@ -62,7 +62,7 @@ ADAPTIVE_DELAY_CAP = 3.0  # teto do buffer adaptativo abaixo, pra não herdar um
 SESSION_CONFIG_FILE = sys.argv[1] if len(sys.argv) > 1 else "config.json"
 STATUS_FILE = "status.json"  # status ao vivo, lido pelo painel.py
 LOCK_FILE = "bot.lock"  # sentinela compartilhado com painel.py
-LOG_FILE = "bot_log.txt"  # console fica oculto (ShowWindow 0) - sem isso print() não vai a lugar nenhum
+LOG_FILE = "lobby_log.txt"  # arquivo próprio (era bot_log.txt compartilhado) - console fica oculto (ShowWindow 0), sem isso print() não vai a lugar nenhum
 
 
 def _log(msg: str) -> None:
@@ -202,7 +202,7 @@ CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION}_lobby.txt")
 # Margem escala com a largura da tela: em resoluções ultrawide a lista de
 # lobbies desloca mais os itens, e a janela de 60px (base 1920x1080) errava
 # o alvo com mais frequência, caindo no fallback de scan em tela cheia
-# (bem mais caro em telas maiores) — daí a demora reportada em 3440x1440.
+# (bem mais caro em telas maiores) — daí a demora reportada em resoluções maiores.
 try:
     _RES_WIDTH = int(RESOLUTION.lower().split("x")[0])
 except Exception:
@@ -649,18 +649,22 @@ def _accept_loop() -> bool:
     while True:
         err = locate("erro.png")
         if err:
+            _log("_accept_loop: erro.png apareceu depois do aceitar - clicando e abortando")
             safe_click(err)
             time.sleep(0.1)
             return False
 
         if locate("fim.png"):
+            _log("_accept_loop: fim.png achado - entrando no jogo")
             _launch_in_game()
             return True
 
         if locate("sala.png"):
+            _log("_accept_loop: voltou pra sala.png depois do aceitar (provável sala cheia) - abortando")
             return False
 
         if time.time() - start > FIM_TIMEOUT:
+            _log(f"_accept_loop: TIMEOUT ({FIM_TIMEOUT}s) sem erro/fim/sala - abortando")
             return False
 
         time.sleep(POLL_FAST)
@@ -762,6 +766,7 @@ def step_lobby() -> None:
         if inside_room:
             err = locate("erro.png")
             if err:
+                _log("step_lobby: erro.png dentro da sala - reiniciando dota")
                 safe_click(err, pause=0.1)
                 time.sleep(0.2)
                 _restart_with_current_password()
@@ -773,15 +778,18 @@ def step_lobby() -> None:
                 # mesmo motivo do duplo clique em game.png (ver step_lobby):
                 # sem duration o cursor teleporta e o Dota não registra hover
                 # antes do click, fazendo o "aceitar" às vezes não pegar.
+                _log("step_lobby: aceitar.png achado - clicando")
                 safe_click(aceitar, pause=GAME_ENTER_PAUSE, duration=0.1)
                 completed = _accept_loop()
                 if completed:
                     return
+                _log("step_lobby: aceitar falhou (ver motivo no _accept_loop acima) - reiniciando dota")
                 _restart_with_current_password()
                 inside_room = False
                 continue
 
             if time.time() - room_enter_time > SALA_TIMEOUT:
+                _log(f"step_lobby: SALA_TIMEOUT ({SALA_TIMEOUT}s) sem aceitar/erro - sala travada, reiniciando dota")
                 _restart_with_current_password()
                 inside_room = False
                 continue
@@ -792,6 +800,7 @@ def step_lobby() -> None:
         # ── ESTADO: buscando lobby na lista ─────────────────────────────────
         err = locate("erro.png")
         if err:
+            _log("step_lobby: erro.png na lista (fora da sala) - fechando e clicando ATT de novo")
             safe_click(err, pause=0.1)
             time.sleep(0.2)
             safe_click(locate("att.png"), pause=0.2)
@@ -810,7 +819,7 @@ def step_lobby() -> None:
             _proceed_to_filter()
             continue
 
-        # Game encontrado → quatro cliques simples em sequência na posição já
+        # Game encontrado → três cliques simples em sequência na posição já
         # capturada. pyautogui.doubleClick() manda um evento de double-click
         # de SO que o Dota às vezes não reconhece (mouse chega mas não entra
         # na sala) - cliques separados replicam o que já funcionava.
@@ -819,14 +828,13 @@ def step_lobby() -> None:
         # pyautogui.PAUSE - sobra ~0.008s real antes do clique, cedo demais
         # pro Dota registrar hover na linha antes do click (clica "no vazio").
         # Duration força movimento real; pausa maior antes do 1º clique dá
-        # tempo do hover render. Do 2º ao 4º clique o hover já foi
+        # tempo do hover render. Do 2º ao 3º clique o hover já foi
         # registrado, então usa CLICK_PAUSE (bem mais apertado) só pra
-        # garantir que o Dota separe os eventos - 4 cliques quase juntos
-        # cobrem o caso de o 1º/2º não pegar sem esperar outro ciclo de ATT.
+        # garantir que o Dota separe os eventos - 3 cliques quase juntos
+        # cobrem o caso de o 1º não pegar sem esperar outro ciclo de ATT.
+        _log(f"step_lobby: game.png achado em {game} - 3 cliques pra entrar na sala")
         pyautogui.moveTo(game[0], game[1], duration=0.1)
         time.sleep(GAME_ENTER_PAUSE)
-        pyautogui.click()
-        time.sleep(CLICK_PAUSE)
         pyautogui.click()
         time.sleep(CLICK_PAUSE)
         pyautogui.click()

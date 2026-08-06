@@ -1,7 +1,7 @@
 buscar.png=470,832
 200.png=376,164
 fim.png=960,763
-image.png=1129,30
+image.png=1130,30
 lista.png=881,83
 lobby.png=920,834
 ok.png=1008,604

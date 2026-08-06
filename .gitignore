@@ -11,6 +11,9 @@ teste.py
 config.json
 status.json
 bot_log.txt
+lobby_log.txt
+in_game_log.txt
+fim_game_log.txt
 users_config.json
 skills-lock.json
 .agents

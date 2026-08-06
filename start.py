@@ -81,7 +81,6 @@ LANGUAGES = {
 RESOLUTIONS = {
     "1920x1080": "1920x1080",
     "1600x900": "1600x900",
-    "3440x1440": "3440x1440",
 }
 
 LANGUAGES_REVERSE = {v: k for k, v in LANGUAGES.items()}
@@ -223,20 +222,13 @@ def apply_saved_config(saved: dict) -> None:
 
     atualizar_interface_idioma()
 
-RESOLUTION_PT_BR_ONLY = "3440x1440"  # maior resolução - só selecionável em pt-br, some do combo nos outros idiomas
-
 def atualizar_interface_idioma(event=None) -> None:
     language_display = language_var.get()
     language_folder = LANGUAGES.get(language_display, "pt-br")
 
     load_language(language_folder)
 
-    if language_folder == "pt-br":
-        combo_resolution["values"] = list(RESOLUTIONS.keys())
-    else:
-        combo_resolution["values"] = [r for r in RESOLUTIONS if r != RESOLUTION_PT_BR_ONLY]
-        if resolution_var.get() == RESOLUTION_PT_BR_ONLY:
-            resolution_var.set("1920x1080")
+    combo_resolution["values"] = list(RESOLUTIONS.keys())
 
     root.title(f"{TEXT.get('title', 'Auto Lobby Level Up')} - {updater.get_local_version()}")
     lbl_pw1.config(text=TEXT.get("password_1", "Password"))
