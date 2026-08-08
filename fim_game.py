@@ -521,8 +521,13 @@ _em_equipamento = threading.Event()
 
 BONUS_DISAPPEAR_TIMEOUT = 3.0
 
+# Quantos bonus.png esperar/clicar na última partida do ciclo: um por
+# marcação ativa (crystal/equipment) no config. 0 = fecha direto sem esperar
+# bonus; 1 = espera e clica um; 2 = espera e clica dois; e assim por diante.
+BONUS_MARCACOES = sum(1 for k in ("crystal", "equipment") if CONFIG.get(k))
 
-def _bonus_watcher(wait_once: bool = False) -> None:
+
+def _bonus_watcher(wait_once: bool = False, vezes: int = 1) -> None:
     """
     Fica clicando bonus.png ("I am the champion") sempre que aparecer -
     mesmo mecanismo que era do in_game.py durante a partida, agora só aqui
@@ -533,8 +538,12 @@ def _bonus_watcher(wait_once: bool = False) -> None:
     infinito, só de olho enquanto espera a próxima partida começar.
 
     wait_once=True (é a última partida do ciclo): chamada direta (bloqueia),
-    espera aparecer, clica uma vez e retorna - só então fecha o dota.
+    espera aparecer e clica `vezes` bonus (um por marcação ativa -
+    BONUS_MARCACOES) e retorna - só então fecha o dota. Entre um clique e o
+    próximo espera o bonus atual sumir, pra não contar o mesmo popup duas
+    vezes.
     """
+    cliques = 0
     while True:
         try:
             pos = locate("bonus", "bonus.png", confidence=0.75)
@@ -552,7 +561,14 @@ def _bonus_watcher(wait_once: bool = False) -> None:
                             "bonus", "bonus.png", confidence=0.75, timeout=BONUS_DISAPPEAR_TIMEOUT
                         )
                 if wait_once:
-                    return
+                    cliques += 1
+                    if cliques >= vezes:
+                        return
+                    # Ainda faltam bonus: espera o atual sumir antes de voltar
+                    # a procurar, pra não clicar de novo no mesmo popup.
+                    _aguardar_sumir(
+                        "bonus", "bonus.png", confidence=0.75, timeout=BONUS_DISAPPEAR_TIMEOUT
+                    )
         except Exception:
             pass
         time.sleep(POLL_BONUS)
@@ -929,12 +945,16 @@ def _fonte_timeout_watchdog() -> None:
 
 
 def _launch_in_game() -> None:
-    """Puxa o in_game de novo pra próxima partida do mesmo ciclo."""
+    """Puxa o in_game de novo pra próxima partida do mesmo ciclo.
+
+    --fonte-ok: já esperamos fonte.png aparecer aqui em cima (wait_for_match_start,
+    bloqueante) - avisa o in_game.py pra não reconferir do zero, evita reprovar
+    à toa por fonte.png já ter sumido (transitório) até o processo novo subir."""
     _log("_launch_in_game: puxando in_game pra próxima partida")
     if os.path.exists("in_game.exe"):
-        subprocess.Popen(["in_game.exe"], startupinfo=HIDDEN_WINDOW)
+        subprocess.Popen(["in_game.exe", "--fonte-ok"], startupinfo=HIDDEN_WINDOW)
     elif os.path.exists("in_game.py"):
-        subprocess.Popen([sys.executable, "in_game.py"], startupinfo=HIDDEN_WINDOW)
+        subprocess.Popen([sys.executable, "in_game.py", "--fonte-ok"], startupinfo=HIDDEN_WINDOW)
     os._exit(0)
 
 
@@ -947,10 +967,14 @@ def processar_fim_partida() -> None:
     save_config_update(partidas_concluidas=PARTIDAS_CONCLUIDAS)
 
     if PARTIDAS_CONCLUIDAS >= REHOST_MAX:
-        # Última partida do ciclo: espera o bonus aparecer e clica antes de
-        # fechar (bloqueia aqui, só segue depois de clicar).
-        _log("última partida do ciclo - esperando bonus.png antes de fechar")
-        _bonus_watcher(wait_once=True)
+        # Última partida do ciclo: espera e clica um bonus.png por marcação
+        # ativa (crystal/equipment - BONUS_MARCACOES) antes de fechar. Se não
+        # tem nenhuma marcada, nem espera bonus - fecha direto.
+        if BONUS_MARCACOES > 0:
+            _log(f"última partida do ciclo - esperando {BONUS_MARCACOES} bonus.png antes de fechar")
+            _bonus_watcher(wait_once=True, vezes=BONUS_MARCACOES)
+        else:
+            _log("última partida do ciclo - nenhuma marcação (crystal/equipment), fechando direto")
 
         CICLOS_FEITOS += 1
         save_status(0, REHOST_MAX, CICLOS_FEITOS)

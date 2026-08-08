@@ -13,3 +13,4 @@ wing_rank_s=504,798
 wing_rank_ss=662,798
 wing_rank_sss=316,433
 forja_confirm_forja=1029,520
+fonte=1124,63

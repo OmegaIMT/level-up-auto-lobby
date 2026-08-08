@@ -854,6 +854,12 @@ def monitor_match() -> None:
                 return
 
         if elapsed > TIMEOUT_SEM_COUNT:
+            # Mesmo comportamento dos outros resets (erro/última partida): ao
+            # desistir e voltar pro lobby, ciclo tem que incrementar junto -
+            # sem isso partidas_concluidas zera mas ciclos fica parado,
+            # dessincronizando a contagem (bug visto no log: "partida 1/99
+            # (ciclo 1)" repetido em vez de avançar de ciclo).
+            CICLOS_FEITOS += 1
             save_status(0, REHOST_MAX, CICLOS_FEITOS)
             save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
             disconnect_and_relaunch()
@@ -915,7 +921,16 @@ if __name__ == "__main__":
 
     _log("processo iniciado")
     try:
-        if not wait_for_match_start(timeout=30):
+        # --fonte-ok: fim_game.py já viu fonte.png (bloqueado até achar, sem
+        # timeout) antes de subir esse processo - reconferir aqui de novo é
+        # redundante e corre risco de race: fonte.png é transitório (tela de
+        # loading), pode já ter sumido no tempo que esse processo novo leva
+        # pra iniciar (spawn do Popen + import/DPI/etc), e um timeout falso
+        # aqui derrubava o dota e voltava pro lobby no meio de uma partida
+        # que já tinha começado - só a 1ª partida (chamada direto pelo
+        # lobby.py, sem esse flag) precisa da checagem de verdade.
+        if "--fonte-ok" not in sys.argv and not wait_for_match_start(timeout=30):
+            _log("fonte.png não achou em 30s (sem confirmação prévia) - reiniciando dota")
             disconnect_and_relaunch()
 
         iniciar_partida()

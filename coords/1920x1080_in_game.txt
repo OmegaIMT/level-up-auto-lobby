@@ -1,2 +1,4 @@
+fonte=1124,63
 shop_global=1233,1013
-fonte=1124,62
+hammer=1163,1018
+pill=1234,1018
