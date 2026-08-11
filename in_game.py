@@ -36,6 +36,21 @@ def _log(msg: str) -> None:
     except Exception:
         pass
 
+DIAG_DIR = "diag"
+
+def _salvar_diagnostico(motivo: str) -> None:
+    """Tira screenshot da tela no momento em que o monitor desiste (timeout /
+    erro) pra distinguir 'dota travou/desconectou' de 'count.png não bateu'.
+    Salva em diag/ com timestamp no nome. Nunca derruba o fluxo se falhar."""
+    try:
+        os.makedirs(DIAG_DIR, exist_ok=True)
+        nome = f"{time.strftime('%Y%m%d_%H%M%S')}_{motivo}.png"
+        caminho = os.path.join(DIAG_DIR, nome)
+        pyautogui.screenshot().save(caminho)
+        _log(f"_salvar_diagnostico: screenshot salvo em {caminho}")
+    except Exception as e:
+        _log(f"_salvar_diagnostico: falhou ({e})")
+
 def load_config() -> dict:
     if not os.path.exists(CONFIG_FILE):
         return {}
@@ -88,12 +103,20 @@ except Exception:
     _RES_WIDTH = 1920
 CACHE_MARGIN      = max(60, round(60 * _RES_WIDTH / 1920))  # escala com a resolução (ver lobby.py)
 POLL_IN_GAME      = 2.0
+POLL_COUNT        = 4.0  # detecção de fim (count.png) em thread própria, isolada do farm. Busca por região (barata) -> pode pollar rápido. 4s pra não perder a tela de count que às vezes fica só ~5s visível. Ver monitorar_count
 POLL_TESOURO      = 10.0
 POLL_STATUS       = 30.0
 POLL_ROSHAN       = 5.0
 ROSHAN_WAIT_FIRST = 300.0  # espera antes de começar a checar roshan.png - não existe/não faz sentido checar logo no início da partida
 ROSHAN_CLICK_WAIT = 2.0  # clica e espera antes de pressionar 'd' - mesmo esquema do ativar_endless (fim_game.py)
-TIMEOUT_SEM_COUNT = 4800
+TIMEOUT_SEM_COUNT = 1200  # 20 min - partida normal dura ~11 min; era 4800 (80 min), tempo demais parado antes de relançar
+
+# bonus.png ("I am the champion") da partida ANTERIOR pode ficar na tela ao
+# entrar na próxima, tapando os cliques de suporte/xp. Ao achar fonte.png,
+# limpar_bonus_inicial fecha o popup antes de iniciar a partida.
+POLL_BONUS               = 1.0
+BONUS_DISAPPEAR_TIMEOUT  = 5.0
+BONUS_INICIAL_TIMEOUT    = 15.0
 
 # Tempo (s) sem ver count.png a partir do qual passamos a checar as imagens
 # de erro na pasta global "error".
@@ -289,6 +312,25 @@ def _cache_invalidate(name: str) -> None:
 
 Region = tuple[int, int, int, int]
 
+def _calc_count_region() -> Region:
+    """Recorte onde o botão ViewSettle (count.png) aparece: faixa larga no
+    topo-centro da tela. Calculada do tamanho REAL da tela (não hardcoded),
+    então sobrevive a mudança de resolução/escala - foi o que quebrava as
+    tentativas antigas de busca por região (recorte menor que a imagem /
+    coords fora de escala -> nunca achava). Bem generosa de propósito:
+    x 34%-66%, y 3%-16% da tela. Pra afinar/ampliar é só mexer aqui."""
+    try:
+        w, h = pyautogui.size()
+    except Exception:
+        w, h = 1920, 1080
+    left   = int(w * 0.34)
+    top    = int(h * 0.03)
+    width  = int(w * 0.32)
+    height = int(h * 0.13)
+    return (left, top, width, height)
+
+COUNT_REGION = _calc_count_region()
+
 def _img(*parts: str) -> str:
     """Caminho dentro de IMG_DIR (dependente de idioma)."""
     return os.path.join(IMG_DIR, *parts)
@@ -303,10 +345,17 @@ def _locate_raw(path: str, confidence: float, region: Optional[Region] = None) -
     except Exception:
         return None
 
-def locate(cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir: str = IMG_DIR) -> Optional[tuple[int, int]]:
+def locate(cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir: str = IMG_DIR, region: Optional[Region] = None) -> Optional[tuple[int, int]]:
     full_path = os.path.join(base_dir, *path_parts)
     if not os.path.exists(full_path):
         return None
+
+    # region fixa: busca só nesse recorte, ignora cache. Usado no count.png
+    # (botão ViewSettle, sempre no topo-centro) pra não varrer a tela toda.
+    if region is not None:
+        pos = _locate_raw(full_path, confidence, region=region)
+        _update_debug(cache_key, pos is not None)
+        return pos
 
     cached = _coord_cache.get(cache_key)
     if cached is not None:
@@ -641,6 +690,7 @@ def _tesouro_cycle(imagens_tesouro: List[str]) -> None:
         pos_tesouro = encontrar_tesouro_principal()
 
         if pos_tesouro and not _stop_extras.is_set():
+            _log(f"_tesouro_cycle: tesouro.png achado {pos_tesouro} - clicando")
             click_pos(pos_tesouro, 0.5)
             encontrou = False
 
@@ -661,6 +711,7 @@ def _tesouro_cycle(imagens_tesouro: List[str]) -> None:
 
                     encontrou = True
                     click_pos(pos, 0.5)
+                    _log(f"_tesouro_cycle: {img_nome} achado {pos} (conf {confianca}) - clicado")
                     if confianca == 0.9:
                         # achou com confiança alta -> não busca essa de novo (mais rápido)
                         _tesouros_clicados.append(img_nome)
@@ -673,9 +724,10 @@ def _tesouro_cycle(imagens_tesouro: List[str]) -> None:
                     break
 
             if not encontrou and not _stop_extras.is_set():
+                _log("_tesouro_cycle: tesouro.png clicado mas nenhum sub-tesouro achado - clicando centro")
                 click_centro_tela()
     except Exception:
-        pass
+        _log("_tesouro_cycle: EXCEÇÃO:\n" + traceback.format_exc())
 
 def monitorar_tesouro() -> None:
     global _tesouros_clicados
@@ -724,6 +776,7 @@ def monitorar_roshan() -> None:
 
 def disable_xp() -> None:
     if not NO_XP or XP_BUTTON_BASE is None:
+        _log(f"disable_xp: PULADO (no_xp={NO_XP}, coord={'ok' if XP_BUTTON_BASE else 'ausente'})")
         return
     x, y = scale_coord(XP_BUTTON_BASE)
     # pre_delay/move_duration maiores que o padrão de _click_at - mesmo
@@ -731,6 +784,7 @@ def disable_xp() -> None:
     # duration teleporta, e o pre_delay padrão (0.05s) é curto demais pro
     # jogo registrar hover antes do click direito cair.
     _click_at(x, y, right=True, delay=0.2, pre_delay=0.15, move_duration=0.08)
+    _log(f"disable_xp: clique direito em ({x}, {y})")
 
 def ativar_gold() -> None:
     """Mesmo esquema do disable_xp - clique direito na coordenada
@@ -817,27 +871,45 @@ def verificar_erro() -> Optional[str]:
             return nome
     return None
 
+def monitorar_count() -> None:
+    """Detecção de fim de partida ISOLADA do farm: thread própria que só vigia
+    count.png a cada POLL_COUNT segundos, sem depender de tesouro/status/roshan.
+    Se o farm travar (parar de achar tesouro etc.), esta thread continua rodando
+    e detecta o fim normalmente - era a cascata que faltava quebrar (bug do log:
+    farm travava -> count nunca era checado -> 80min de timeout cego). Mesma
+    ideia do monitorar_count_infinito do bot original (v2.x).
+
+    Ao achar count.png: encerra os extras e passa a vez pro fim_game.py (conta
+    a partida, cristal/equipamento, ciclos, decide fechar dota + voltar pro
+    lobby ou puxar o in_game de novo)."""
+    _log(f"monitorar_count: iniciado (poll {POLL_COUNT}s, região {COUNT_REGION})")
+    while True:
+        try:
+            pos_count = locate("count", "count.png", confidence=0.70, region=COUNT_REGION)
+        except Exception:
+            _log("monitorar_count: EXCEÇÃO:\n" + traceback.format_exc())
+            pos_count = None
+
+        if pos_count:
+            _log("count.png achado - fim da partida, chamando fim_game")
+            _stop_extras.set()
+            _launch_fim_game()
+            os._exit(0)
+
+        time.sleep(POLL_COUNT)
+
 def monitor_match() -> None:
+    """Watchdog de segurança (thread principal). A detecção de fim (count.png)
+    vive na thread monitorar_count, isolada. Aqui só tratamos os casos de
+    desistência: erro na tela (depois de ERROR_CHECK_SECONDS) ou partida que
+    nunca termina (TIMEOUT_SEM_COUNT) - fecha o dota, volta pro lobby e
+    incrementa o ciclo."""
     global CICLOS_FEITOS
 
     last_seen_time = time.time()
     erro_verificado = False
 
     while True:
-        pos_count = locate("count", "count.png", confidence=0.70)
-
-        if pos_count:
-            # Fim da partida: a partir daqui quem assume é o fim_game.py
-            # (conta a partida, cristal/equipamento, ciclos, decide fechar
-            # o dota + voltar pro lobby ou puxar o in_game de novo). Não
-            # espera mais o event.png ser clicado - se count.png já apareceu,
-            # segue direto pro fim_game mesmo que o evento nunca tenha
-            # aparecido (esperar sem timeout travava a transição pra sempre).
-            _log("count.png achado - fim da partida, chamando fim_game")
-            _stop_extras.set()
-            _launch_fim_game()
-            os._exit(0)
-
         elapsed = time.time() - last_seen_time
 
         # Checagem de erro: só uma vez por ciclo de espera, depois de ERROR_CHECK_SECONDS.
@@ -847,6 +919,8 @@ def monitor_match() -> None:
             if nome_erro:
                 # Mesmo comportamento de quando atinge o max de partidas:
                 # fecha o dota, chama o lobby e salva mais um ciclo.
+                _log(f"monitor_match: erro '{nome_erro}' detectado - relançando")
+                _salvar_diagnostico(f"erro_{os.path.splitext(nome_erro)[0]}")
                 CICLOS_FEITOS += 1
                 save_status(0, REHOST_MAX, CICLOS_FEITOS)
                 save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
@@ -859,6 +933,8 @@ def monitor_match() -> None:
             # sem isso partidas_concluidas zera mas ciclos fica parado,
             # dessincronizando a contagem (bug visto no log: "partida 1/99
             # (ciclo 1)" repetido em vez de avançar de ciclo).
+            _log(f"monitor_match: TIMEOUT_SEM_COUNT ({TIMEOUT_SEM_COUNT}s) - count.png nunca apareceu, relançando")
+            _salvar_diagnostico("timeout_sem_count")
             CICLOS_FEITOS += 1
             save_status(0, REHOST_MAX, CICLOS_FEITOS)
             save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
@@ -889,9 +965,47 @@ def centralizar_camera() -> None:
     time.sleep(CENTRO_DELAY)
     run_extra(_pressionar_f3, priority=PRIORITY_CENTRO)
 
+def _bonus_sumiu(timeout: float = BONUS_DISAPPEAR_TIMEOUT) -> bool:
+    """Espera bonus.png sumir da tela (depois do clique), até timeout."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not locate("bonus", "bonus.png", confidence=0.75):
+            return True
+        time.sleep(0.3)
+    return False
+
+def limpar_bonus_inicial(timeout: float = BONUS_INICIAL_TIMEOUT) -> None:
+    """Ao entrar na partida (fonte.png achado), o popup bonus.png ('I am the
+    champion') da partida anterior pode ainda estar na tela, tapando os
+    cliques de suporte/xp. Fica clicando pra fechar até sumir (ou timeout).
+    Mesma ideia do _bonus_watcher do fim_game.py."""
+    deadline = time.time() + timeout
+    cliques = 0
+    while time.time() < deadline:
+        try:
+            pos = locate("bonus", "bonus.png", confidence=0.75)
+        except Exception:
+            _log("limpar_bonus_inicial: EXCEÇÃO:\n" + traceback.format_exc())
+            return
+        if not pos:
+            if cliques:
+                _log(f"limpar_bonus_inicial: tela limpa ({cliques} bonus fechados)")
+            return
+        _log(f"limpar_bonus_inicial: bonus.png achado {pos} - clicando")
+        click_pos(pos, 0.5)
+        cliques += 1
+        _bonus_sumiu()
+        time.sleep(POLL_BONUS)
+    _log(f"limpar_bonus_inicial: TIMEOUT ({timeout}s) - clicou {cliques} bonus")
+
 def iniciar_partida():
     _stop_extras.clear()
     _evento_encontrado.clear()
+
+    # Detecção de fim isolada: sobe SEMPRE, independente dos flags de farm
+    # (SUPORTE/ROSHAN/CENTRO). É o que garante achar o count.png mesmo se o
+    # farm travar.
+    threading.Thread(target=monitorar_count, daemon=True).start()
 
     threading.Thread(target=buscar_evento, daemon=True).start()
     if CENTRO:
@@ -932,6 +1046,10 @@ if __name__ == "__main__":
         if "--fonte-ok" not in sys.argv and not wait_for_match_start(timeout=30):
             _log("fonte.png não achou em 30s (sem confirmação prévia) - reiniciando dota")
             disconnect_and_relaunch()
+
+        # fonte.png confirmado (aqui ou pelo fim_game via --fonte-ok): limpa
+        # qualquer bonus.png que tenha entrado tapando a tela antes de começar.
+        limpar_bonus_inicial()
 
         iniciar_partida()
 

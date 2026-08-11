@@ -1,4 +1,1 @@
-fonte=1124,63
-shop_global=1233,1013
-hammer=1163,1018
-pill=1234,1018
+fonte=1123,63

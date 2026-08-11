@@ -1,7 +1,5 @@
 pena_confirm=979,922
 forja_confirm=1030,521
-forja_confirm_forja_1=1861,35
-pena_confirm_pena=978,922
 wing_rank_ex=1020,807
 fim_go_it=960,653
 fim_upgrade=1035,883
@@ -12,5 +10,6 @@ wing_rank_a=430,796
 wing_rank_s=504,798
 wing_rank_ss=662,798
 wing_rank_sss=316,433
+pena_confirm_pena=978,922
 forja_confirm_forja=1029,520
-fonte=1124,63
+fonte=1123,62

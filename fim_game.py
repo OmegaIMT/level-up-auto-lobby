@@ -506,7 +506,9 @@ def wait_for_match_start(poll: float = 2.0, timeout: Optional[float] = None) -> 
         time.sleep(poll)
 
 
-POLL_BONUS = 3.0
+# Poll curto: bonus.png aparece durante a venda e some rápido (cliques de
+# coord fixa cobrem/dispensam). 3s perdia o popup - 0.5s pega antes.
+POLL_BONUS = 0.5
 
 # Setado pelo _bonus_watcher sempre que clica bonus.png - os fluxos de venda
 # (vender_wings/vender_equipamento) checam isso pra saber se o popup atrapalhou
@@ -526,8 +528,17 @@ BONUS_DISAPPEAR_TIMEOUT = 3.0
 # bonus; 1 = espera e clica um; 2 = espera e clica dois; e assim por diante.
 BONUS_MARCACOES = sum(1 for k in ("crystal", "equipment") if CONFIG.get(k))
 
+# Timeout do claim de bonus da ÚLTIMA partida (antes de fechar). Sem ele o
+# _bonus_watcher(wait_once=True) bloqueava pra sempre se aparecessem menos
+# bonus que BONUS_MARCACOES (ex: jogo mostra 1 popup mas conta crystal+equip=2)
+# - travava o fechamento e o ciclo nunca incrementava (bug de "não contabiliza
+# ciclos"). Estourou: fecha e incrementa ciclo com o que clicou.
+BONUS_ULTIMA_PARTIDA_TIMEOUT = 45.0
 
-def _bonus_watcher(wait_once: bool = False, vezes: int = 1) -> None:
+
+def _bonus_watcher(
+    wait_once: bool = False, vezes: int = 1, timeout: Optional[float] = None
+) -> None:
     """
     Fica clicando bonus.png ("I am the champion") sempre que aparecer -
     mesmo mecanismo que era do in_game.py durante a partida, agora só aqui
@@ -542,12 +553,23 @@ def _bonus_watcher(wait_once: bool = False, vezes: int = 1) -> None:
     BONUS_MARCACOES) e retorna - só então fecha o dota. Entre um clique e o
     próximo espera o bonus atual sumir, pra não contar o mesmo popup duas
     vezes.
+
+    timeout (só com wait_once): tempo máx esperando os bonus aparecerem. Sem
+    ele o modo bloqueante espera pra sempre - ok na última partida (fecha
+    depois), mas perigoso quando roda ANTES da venda numa partida normal
+    (bonus pode não aparecer e travaria o fluxo). Estourou -> retorna com o
+    que clicou até aqui.
     """
     cliques = 0
+    deadline = time.time() + timeout if (wait_once and timeout is not None) else None
     while True:
+        if deadline is not None and time.time() > deadline:
+            _log(f"_bonus_watcher: TIMEOUT ({timeout}s) - clicou {cliques}/{vezes} bonus")
+            return
         try:
             pos = locate("bonus", "bonus.png", confidence=0.75)
             if pos:
+                _log(f"_bonus_watcher: bonus.png achou {pos} - clicando (wait_once={wait_once})")
                 click_pos(pos, 0.5)
                 _bonus_interrupt.set()
                 if _em_equipamento.is_set() and not _aguardar_sumir(
@@ -971,8 +993,8 @@ def processar_fim_partida() -> None:
         # ativa (crystal/equipment - BONUS_MARCACOES) antes de fechar. Se não
         # tem nenhuma marcada, nem espera bonus - fecha direto.
         if BONUS_MARCACOES > 0:
-            _log(f"última partida do ciclo - esperando {BONUS_MARCACOES} bonus.png antes de fechar")
-            _bonus_watcher(wait_once=True, vezes=BONUS_MARCACOES)
+            _log(f"última partida do ciclo - esperando até {BONUS_MARCACOES} bonus.png (timeout {BONUS_ULTIMA_PARTIDA_TIMEOUT}s) antes de fechar")
+            _bonus_watcher(wait_once=True, vezes=BONUS_MARCACOES, timeout=BONUS_ULTIMA_PARTIDA_TIMEOUT)
         else:
             _log("última partida do ciclo - nenhuma marcação (crystal/equipment), fechando direto")
 
@@ -982,9 +1004,12 @@ def processar_fim_partida() -> None:
         disconnect_and_relaunch()
         return
 
-    # Ainda não é a última partida do ciclo: fica de olho em bonus.png
-    # enquanto espera a próxima partida começar (ver _bonus_watcher). Bonus
-    # tem prioridade sobre tudo - roda solto em paralelo com a venda abaixo.
+    # Partida normal: daemon fica buscando bonus.png SEM PARAR até o processo
+    # morrer (próxima partida) - clica toda vez que aparecer, quantas vezes
+    # for. Bonus aparece durante a venda também, então roda solto em paralelo
+    # com a venda abaixo. Poll curto (POLL_BONUS) pra pegar o popup rápido,
+    # antes dos cliques de coord fixa da venda cobrirem/dispensarem ele - era
+    # o bug de "não clica bonus nas partidas normais" (poll de 3s perdia).
     threading.Thread(target=_bonus_watcher, daemon=True).start()
 
     # Watchdog do TIMEOUT_SEM_FONTE já sobe aqui, em paralelo - conta o tempo
