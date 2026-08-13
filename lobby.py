@@ -51,6 +51,7 @@ SALA_TIMEOUT = (
 FIM_TIMEOUT = (
     360  # fim.png não aparece (aceitar travado) por mais que isso reinicia o dota
 )
+ACCEPT_RETRIES = 8  # cliques máximos em aceitar.png até ele sumir (o clique às vezes não pega no Dota)
 DOTA_OPEN_TIMEOUT = 90  # tempo max esperando a janela do Dota 2 aparecer após steam://run/570
 DOTA_RETRY_INTERVAL = 15  # reenvia steam://run/570 se a janela ainda não apareceu
 MENU_STALL_TIMEOUT = 60  # step_menu sem achar lista.png/image.png por mais que isso: reabre o Dota
@@ -778,8 +779,18 @@ def step_lobby() -> None:
                 # mesmo motivo do duplo clique em game.png (ver step_lobby):
                 # sem duration o cursor teleporta e o Dota não registra hover
                 # antes do click, fazendo o "aceitar" às vezes não pegar.
+                # Clica e reconfirma: se aceitar.png ainda estiver na tela, o
+                # clique não pegou - clica de novo até sumir (teto ACCEPT_RETRIES)
+                # em vez de cair direto no _accept_loop e travar até FIM_TIMEOUT.
                 _log("step_lobby: aceitar.png achado - clicando")
-                safe_click(aceitar, pause=GAME_ENTER_PAUSE, duration=0.1)
+                for tentativa in range(1, ACCEPT_RETRIES + 1):
+                    safe_click(aceitar, pause=GAME_ENTER_PAUSE, duration=0.1)
+                    time.sleep(POLL_FAST)
+                    aceitar = locate("aceitar.png")
+                    if not aceitar:
+                        _log(f"step_lobby: aceitar sumiu na tentativa {tentativa}")
+                        break
+                    _log(f"step_lobby: aceitar ainda na tela (tentativa {tentativa}/{ACCEPT_RETRIES}) - clicando de novo")
                 completed = _accept_loop()
                 if completed:
                     return
