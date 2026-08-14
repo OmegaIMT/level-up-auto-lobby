@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -52,8 +53,10 @@ FIM_TIMEOUT = (
     360  # fim.png não aparece (aceitar travado) por mais que isso reinicia o dota
 )
 ACCEPT_RETRIES = 8  # cliques máximos em aceitar.png até ele sumir (o clique às vezes não pega no Dota)
-DOTA_OPEN_TIMEOUT = 90  # tempo max esperando a janela do Dota 2 aparecer após steam://run/570
-DOTA_RETRY_INTERVAL = 15  # reenvia steam://run/570 se a janela ainda não apareceu
+DOTA_OPEN_TIMEOUT = 180  # tempo max esperando a janela do Dota 2 aparecer após steam://run/570 (subiu de 90: PC/Steam lento perdia a janela)
+DOTA_RETRY_INTERVAL = 10  # reenvia steam://run/570 se a janela ainda não apareceu (baixou de 15: mais tentativas dentro do timeout)
+DOTA_UPDATE_TIMEOUT = 1800  # se o Steam estiver baixando atualização do Dota, estende a espera até isso (30min) em vez de desistir
+DOTA_UPDATE_LOG_EVERY = 30  # a cada quantos s logar o progresso do update enquanto espera
 MENU_STALL_TIMEOUT = 60  # step_menu sem achar lista.png/image.png por mais que isso: reabre o Dota
 ADAPTIVE_DELAY_CAP = 3.0  # teto do buffer adaptativo abaixo, pra não herdar um travamento (ex: MENU_STALL_TIMEOUT) como espera
 
@@ -500,13 +503,94 @@ def safe_click(pos: tuple[int, int] | None, pause: float = CLICK_PAUSE, duration
 # ==================================================
 # GAME FLOW
 # ==================================================
-def open_dota() -> None:
-    if focus_dota():
-        return
+def _kill_dota() -> None:
+    """Mata qualquer dota2.exe (inclusive um zumbi travado que impede o Steam
+    de relançar)."""
+    try:
+        subprocess.run(
+            ["taskkill", "/F", "/IM", "dota2.exe"],
+            startupinfo=HIDDEN_WINDOW,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
 
-    _log("Janela do Dota 2 não encontrada, abrindo via steam://run/570")
-    deadline = time.time() + DOTA_OPEN_TIMEOUT
+
+def _steam_path() -> str | None:
+    """Pasta de instalação do Steam (registro, com fallback nos caminhos padrão)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as k:
+            val, _ = winreg.QueryValueEx(k, "SteamPath")
+            if val and os.path.isdir(val):
+                return val
+    except Exception:
+        pass
+    for p in (r"C:\Program Files (x86)\Steam", r"C:\Program Files\Steam"):
+        if os.path.isdir(p):
+            return p
+    return None
+
+
+def _dota_appmanifest() -> str | None:
+    """Caminho do appmanifest_570.acf do Dota, procurando em todas as bibliotecas
+    Steam (libraryfolders.vdf). None se não achar."""
+    steam = _steam_path()
+    if not steam:
+        return None
+    libs = [steam]
+    vdf = os.path.join(steam, "steamapps", "libraryfolders.vdf")
+    try:
+        with open(vdf, "r", encoding="utf-8", errors="ignore") as f:
+            libs.extend(
+                m.group(1).replace("\\\\", "\\")
+                for m in re.finditer(r'"path"\s*"([^"]+)"', f.read())
+            )
+    except Exception:
+        pass
+    for lib in libs:
+        manifest = os.path.join(lib, "steamapps", "appmanifest_570.acf")
+        if os.path.exists(manifest):
+            return manifest
+    return None
+
+
+def dota_update_pending() -> tuple[bool, int]:
+    """(precisa_atualizar, pct_baixado) lendo o StateFlags do Steam.
+    StateFlags == 4 → instalado e atualizado. Sem Steam/manifest → (False, 0),
+    e o fluxo normal (timeout curto) segue como antes."""
+    manifest = _dota_appmanifest()
+    if not manifest:
+        return False, 0
+    try:
+        with open(manifest, "r", encoding="utf-8", errors="ignore") as f:
+            data = f.read()
+    except Exception:
+        return False, 0
+
+    def _num(key: str) -> int:
+        m = re.search(rf'"{key}"\s*"(\d+)"', data)
+        return int(m.group(1)) if m else 0
+
+    if _num("StateFlags") == 4:  # StateFullyInstalled, nada pendente
+        return False, 100
+    to_dl = _num("BytesToDownload")
+    dled = _num("BytesDownloaded")
+    pct = int(dled * 100 / to_dl) if to_dl else 0
+    return True, pct
+
+
+def _launch_loop(timeout: float) -> bool:
+    """Dispara steam://run/570 periodicamente até a janela do Dota aparecer ou
+    estourar o timeout. Se detectar update baixando, estende o prazo até
+    DOTA_UPDATE_TIMEOUT (Steam atualiza o Dota antes de abrir e isso leva minutos)."""
+    deadline = time.time() + timeout
     last_launch = 0.0
+    last_update_log = 0.0
     while time.time() < deadline:
         if time.time() - last_launch >= DOTA_RETRY_INTERVAL:
             try:
@@ -520,9 +604,37 @@ def open_dota() -> None:
 
         time.sleep(1.0)
         if focus_dota():
-            return
+            return True
 
-    _log(f"Timeout de {DOTA_OPEN_TIMEOUT}s esperando a janela do Dota 2 abrir")
+        pending, pct = dota_update_pending()
+        if pending:
+            deadline = max(deadline, time.time() + DOTA_UPDATE_TIMEOUT)
+            if time.time() - last_update_log >= DOTA_UPDATE_LOG_EVERY:
+                _log(f"Dota atualizando pelo Steam ({pct}% baixado) - aguardando update terminar")
+                last_update_log = time.time()
+    return False
+
+
+def open_dota() -> bool:
+    """Garante o Dota aberto e focado. Trata Steam lento, update em andamento e
+    dota2.exe zumbi. Retorna True se a janela apareceu."""
+    if focus_dota():
+        return True
+
+    _log("Janela do Dota 2 não encontrada, abrindo via steam://run/570")
+    if _launch_loop(DOTA_OPEN_TIMEOUT):
+        return True
+
+    # timeout sem update em andamento: pode ter sobrado um dota2.exe travado
+    # segurando o relançamento. Mata o resíduo e tenta mais uma rodada.
+    _log(f"Timeout de {DOTA_OPEN_TIMEOUT}s - matando dota2.exe resíduo e tentando de novo")
+    _kill_dota()
+    time.sleep(4.0)
+    if _launch_loop(DOTA_OPEN_TIMEOUT):
+        return True
+
+    _log("Timeout definitivo esperando a janela do Dota 2 abrir")
+    return False
 
 
 def step_up_name() -> None:
@@ -562,9 +674,17 @@ def step_menu() -> None:
             stall_start = time.time()
 
         if time.time() - stall_start > MENU_STALL_TIMEOUT:
-            _log("step_menu travado sem achar lista.png/image.png - refazendo fluxo completo")
-            focus_dota()
-            return step_menu()
+            # focus_dota() sozinho NÃO abre o Dota - se a janela sumiu (crash,
+            # fechou ou update), reabre de fato via open_dota. Sem isso o loop
+            # ficava horas "refazendo fluxo completo" em cima de nada.
+            if not focus_dota():
+                _log("step_menu travado e janela do Dota sumiu - reabrindo o Dota")
+                open_dota()
+            else:
+                _log("step_menu travado sem achar lista.png/image.png - refazendo fluxo completo")
+            stall_start = time.time()
+            menu_start = time.time()
+            continue
 
         time.sleep(MENU_STEP_WAIT)
 
@@ -622,13 +742,7 @@ def _launch_in_game() -> None:
 
 
 def _restart_dota() -> None:
-    try:
-        subprocess.Popen(
-            ["taskkill", "/F", "/IM", "dota2.exe"],
-            startupinfo=HIDDEN_WINDOW,
-        )
-    except Exception:
-        pass
+    _kill_dota()
     time.sleep(4.0)
     open_dota()
     time.sleep(6.0)

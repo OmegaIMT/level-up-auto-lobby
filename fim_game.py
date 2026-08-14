@@ -935,12 +935,30 @@ def ativar_endless() -> None:
         _log("ativar_endless: 2º endless.png (confirmar entrada) nunca achou depois do 'd'")
 
 
+def _dota_running() -> bool:
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq dota2.exe", "/NH"],
+            startupinfo=HIDDEN_WINDOW,
+            capture_output=True,
+            text=True,
+        )
+        return "dota2.exe" in (out.stdout or "").lower()
+    except Exception:
+        return False
+
+
 def disconnect_and_relaunch() -> None:
     """Fecha o dota e volta pro lobby (fim do ciclo, ou algo travou)."""
     _log("disconnect_and_relaunch: fechando dota e chamando lobby")
     try:
         os.system("taskkill /f /im dota2.exe >nul 2>&1")
-        time.sleep(3)
+        # espera o processo morrer DE FATO antes de chamar o lobby - senão o
+        # lobby dispara steam://run/570 com um dota2.exe ainda fechando, o Steam
+        # não relança a tempo e estoura o timeout do open_dota.
+        deadline = time.time() + 15
+        while time.time() < deadline and _dota_running():
+            time.sleep(0.5)
     except Exception:
         pass
 
