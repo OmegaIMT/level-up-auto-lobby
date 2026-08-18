@@ -85,8 +85,18 @@ REHOST_MAX = int(CONFIG.get("rehost_max", 5))
 CICLOS_FEITOS = int(CONFIG.get("ciclos", 0))
 PARTIDAS_CONCLUIDAS = int(CONFIG.get("partidas_concluidas", 0))
 
+# coords/: mesmo esquema do in_game.py — cache de coordenadas próprio,
+# separado do de in_game.py (processo diferente).
 COORDS_DIR = "coords"
 os.makedirs(COORDS_DIR, exist_ok=True)
+CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION}_fim_game.txt")
+try:
+    _RES_WIDTH = int(RESOLUTION.lower().split("x")[0])
+except Exception:
+    _RES_WIDTH = 1920
+CACHE_MARGIN = max(
+    60, round(60 * _RES_WIDTH / 1920)
+)  # escala com a resolução (ver lobby.py)
 
 # ==================================================
 # VENDER (wings/equipamento) - coordenadas fixas capturadas via
@@ -274,15 +284,68 @@ def _watch_esc() -> None:
     os._exit(1)
 
 
+_coord_cache: dict[str, tuple[int, int]] = {}
+_cache_lock = threading.Lock()
+
+
+def _cache_load() -> None:
+    _coord_cache.clear()
+    if not os.path.exists(CACHE_FILE):
+        return
+    try:
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or "=" not in line:
+                    continue
+                name, coord = line.split("=", 1)
+                x_str, y_str = coord.split(",", 1)
+                _coord_cache[name] = (int(x_str), int(y_str))
+    except Exception:
+        pass
+
+
+def _cache_write() -> None:
+    tmp_file = CACHE_FILE + ".tmp"
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            for name, (cx, cy) in _coord_cache.items():
+                f.write(f"{name}={cx},{cy}\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, CACHE_FILE)
+    except Exception:
+        pass
+
+
+def _cache_save_entry(name: str, x: int, y: int) -> None:
+    with _cache_lock:
+        _coord_cache[name] = (x, y)
+        _cache_write()
+
+
+def _cache_invalidate(name: str) -> None:
+    with _cache_lock:
+        if name in _coord_cache:
+            del _coord_cache[name]
+            _cache_write()
+
+
+Region = tuple[int, int, int, int]
+
+
 def _global_img(*parts: str) -> str:
     """Caminho dentro de GLOBAL_DIR (independente de idioma, só por resolução)."""
     return os.path.join(GLOBAL_DIR, *parts)
 
 
-def _locate_raw(path: str, confidence: float) -> Optional[tuple[int, int]]:
-    # Sempre tela inteira - sem restrição de região/coordenada cacheada.
+def _locate_raw(
+    path: str, confidence: float, region: Optional[Region] = None
+) -> Optional[tuple[int, int]]:
     try:
-        return pyautogui.locateCenterOnScreen(path, confidence=confidence)
+        return pyautogui.locateCenterOnScreen(
+            path, confidence=confidence, region=region
+        )
     except Exception:
         return None
 
@@ -292,19 +355,54 @@ def locate(
     *path_parts: str,
     confidence: float = 0.75,
     base_dir: str = IMG_DIR,
+    use_cache: bool = True,
+    region: Optional[Region] = None,
 ) -> Optional[tuple[int, int]]:
+    """use_cache=False pula a região restrita ao redor da posição cacheada e
+    procura na tela inteira direto - usado nos popups do fim de wings
+    (cancel/confirm/go_it) porque a posição deles varia e a busca por
+    região tava dando falso negativo, deixando de clicar.
+
+    region: recorte fixo (left, top, width, height) pra travar a busca numa
+    faixa da tela - usado nos ícones de rank (b/a/s/ss/sss/ex), que sem
+    isso às vezes batiam no badge de rank do próprio item equipado (linha
+    de cima) em vez do checkbox de seleção (linha de baixo). Ignora cache
+    quando informado - região já é fixa o bastante."""
     full_path = os.path.join(base_dir, *path_parts)
     if not os.path.exists(full_path):
         return None
+
+    if region is not None:
+        pos = _locate_raw(full_path, confidence, region=region)
+        _update_debug(cache_key, pos is not None)
+        return pos
+
+    if use_cache:
+        cached = _coord_cache.get(cache_key)
+        if cached is not None:
+            cx, cy = cached
+            cache_region: Region = (
+                max(0, cx - CACHE_MARGIN),
+                max(0, cy - CACHE_MARGIN),
+                CACHE_MARGIN * 2,
+                CACHE_MARGIN * 2,
+            )
+            pos = _locate_raw(full_path, confidence, region=cache_region)
+            if pos:
+                _update_debug(cache_key, True)
+                return pos
+            _cache_invalidate(cache_key)
+
     pos = _locate_raw(full_path, confidence)
     _update_debug(cache_key, pos is not None)
+    if pos and use_cache:
+        _cache_save_entry(cache_key, pos[0], pos[1])
     return pos
 
 
-def _locate_box_raw(path: str, confidence: float):
-    # Sempre tela inteira - sem restrição de região/coordenada cacheada.
+def _locate_box_raw(path: str, confidence: float, region: Optional[Region] = None):
     try:
-        return pyautogui.locateOnScreen(path, confidence=confidence)
+        return pyautogui.locateOnScreen(path, confidence=confidence, region=region)
     except Exception:
         return None
 
@@ -314,16 +412,38 @@ def locate_box(
     *path_parts: str,
     confidence: float = 0.75,
     base_dir: str = IMG_DIR,
+    use_cache: bool = True,
 ):
     """Igual locate(), mas devolve a caixa (left, top, width, height) em vez
     do centro - usado quando o clique real não é no centro do template e
     precisa escalar com o tamanho encontrado (ex: dog.png, ver
-    DOG_CLICK_Y_RATIO)."""
+    DOG_CLICK_Y_RATIO). use_cache=False: ver locate()."""
     full_path = os.path.join(base_dir, *path_parts)
     if not os.path.exists(full_path):
         return None
+
+    if use_cache:
+        cached = _coord_cache.get(cache_key)
+        if cached is not None:
+            cx, cy = cached
+            region: Region = (
+                max(0, cx - CACHE_MARGIN),
+                max(0, cy - CACHE_MARGIN),
+                CACHE_MARGIN * 2,
+                CACHE_MARGIN * 2,
+            )
+            box = _locate_box_raw(full_path, confidence, region=region)
+            if box:
+                _update_debug(cache_key, True)
+                return box
+            _cache_invalidate(cache_key)
+
     box = _locate_box_raw(full_path, confidence)
     _update_debug(cache_key, box is not None)
+    if box and use_cache:
+        _cache_save_entry(
+            cache_key, box.left + box.width // 2, box.top + box.height // 2
+        )
     return box
 
 
@@ -545,6 +665,26 @@ BRANCH_CHECK_TIMEOUT = 3.0   # só decide qual ramo do fluxo seguir (cancel em w
 GO_IT_WAIT_TIMEOUT = 10.0    # esperando o popup de sucesso (go_it.png) aparecer - só wings
 
 
+def _rank_row_region(coords: dict, prefix: str) -> Optional[Region]:
+    """Faixa horizontal (Y) onde fica a linha de checkbox de rank
+    (b...ex), largura da tela inteira - usa só o Y de {prefix}_b/
+    {prefix}_ex do coords_base_vender.json como referência (o X desses
+    campos é de uma captura antiga e não bate mais com o jogo hoje, mas o Y
+    da linha se manteve). Sem essa restrição, o locate na tela inteira às
+    vezes batia no badge de rank do item equipado (bem mais acima, painel
+    de cima) em vez do checkbox de seleção da linha de baixo - mesmo ícone,
+    lugar errado."""
+    lo = coords.get(f"{prefix}_b")
+    hi = coords.get(f"{prefix}_ex")
+    ys = [p[1] for p in (lo, hi) if p]
+    if not ys:
+        return None
+    y_center = sum(ys) / len(ys)
+    margin = CACHE_MARGIN * 2
+    top = max(0, int(y_center - margin))
+    return (0, top, _RES_WIDTH, margin * 2)
+
+
 def vender_wings() -> None:
     """
     Abre a loja de Wings, abre a lista de itens (buy) uma vez só, marca
@@ -573,24 +713,25 @@ def vender_wings() -> None:
     _clicar_vender(c, "wings", 0.5)
     _clicar_vender(c, "buy", 0.5)
 
+    rank_region = _rank_row_region(c, "wing")
     for rank in ranks:
         rank_pos = _aguardar_aparecer(
-            f"wing_rank_{rank}", f"{rank}.png", base_dir=WINGS_IMG_DIR, timeout=RANK_ICON_WAIT_TIMEOUT
+            f"wing_rank_{rank}", f"{rank}.png", base_dir=WINGS_IMG_DIR, timeout=RANK_ICON_WAIT_TIMEOUT, region=rank_region
         )
         if rank_pos:
             click_pos(rank_pos, 0.3, rest=False)
 
     _clicar_vender(c, "buy_2", 0.5)
 
-    cancel_pos = _aguardar_aparecer("fim_cancel", "cancel.png", base_dir=FIM_GAME_IMG_DIR, timeout=BRANCH_CHECK_TIMEOUT)
+    cancel_pos = _aguardar_aparecer("fim_cancel", "cancel.png", base_dir=FIM_GAME_IMG_DIR, timeout=BRANCH_CHECK_TIMEOUT, use_cache=False)
     _log(f"vender_wings: cancel.png {'achou ' + str(cancel_pos) if cancel_pos else 'NAO achou'}")
 
-    confirm_pos = _aguardar_aparecer("fim_confirm", "confirm.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT)
+    confirm_pos = _aguardar_aparecer("fim_confirm", "confirm.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT, use_cache=False)
     if confirm_pos:
         click_pos(confirm_pos, 1.2, rest=False)
 
     if cancel_pos:
-        go_it_pos = _aguardar_aparecer("fim_go_it", "go_it.png", base_dir=FIM_GAME_IMG_DIR, timeout=GO_IT_WAIT_TIMEOUT)
+        go_it_pos = _aguardar_aparecer("fim_go_it", "go_it.png", base_dir=FIM_GAME_IMG_DIR, timeout=GO_IT_WAIT_TIMEOUT, use_cache=False)
         _log(f"vender_wings: go_it.png {'achou ' + str(go_it_pos) if go_it_pos else 'NAO achou'}")
         if go_it_pos:
             click_pos(go_it_pos, 1.2, rest=False)
@@ -622,27 +763,28 @@ def vender_equipamento() -> None:
             _log("vender_equipamento: loja (forja.png/forja_1.png) NAO abriu - abortando")
             return
 
-        upgrade_pos = _aguardar_aparecer("fim_upgrade", "upgrade.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT)
+        upgrade_pos = _aguardar_aparecer("fim_upgrade", "upgrade.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT, use_cache=False)
         _log(f"vender_equipamento: upgrade.png {'achou ' + str(upgrade_pos) if upgrade_pos else 'NAO achou'}")
         if not upgrade_pos:
             return
         click_pos(upgrade_pos, 0.5, rest=False)
 
+        rank_region = _rank_row_region(c, "equip")
         for rank in ranks:
             rank_pos = _aguardar_aparecer(
-                f"wing_rank_{rank}", f"{rank}.png", base_dir=WINGS_IMG_DIR, timeout=RANK_ICON_WAIT_TIMEOUT
+                f"wing_rank_{rank}", f"{rank}.png", base_dir=WINGS_IMG_DIR, timeout=RANK_ICON_WAIT_TIMEOUT, region=rank_region
             )
             if rank_pos:
                 click_pos(rank_pos, 0.3, rest=False)
 
         # "feed": mesmo papel do batch (2º clique) do wings - fecha a
         # marcação dos ranks. Por imagem, igual batch/upgrade/confirm/go_it.
-        feed_pos = _aguardar_aparecer("fim_feed", "feed.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT)
+        feed_pos = _aguardar_aparecer("fim_feed", "feed.png", base_dir=FIM_GAME_IMG_DIR, timeout=BATCH_WAIT_TIMEOUT, use_cache=False)
         _log(f"vender_equipamento: feed.png {'achou ' + str(feed_pos) if feed_pos else 'NAO achou'}")
         if feed_pos:
             click_pos(feed_pos, 0.5, rest=False)
 
-        confirm_pos = _aguardar_aparecer("fim_confirm", "confirm.png", base_dir=FIM_GAME_IMG_DIR, timeout=BRANCH_CHECK_TIMEOUT)
+        confirm_pos = _aguardar_aparecer("fim_confirm", "confirm.png", base_dir=FIM_GAME_IMG_DIR, timeout=BRANCH_CHECK_TIMEOUT, use_cache=False)
         _log(f"vender_equipamento: confirm.png {'achou ' + str(confirm_pos) if confirm_pos else 'NAO achou'}")
         if confirm_pos:
             click_pos(confirm_pos, 1.2, rest=False)
@@ -674,12 +816,14 @@ def _aguardar_aparecer(
     base_dir: str,
     confidence: float = 0.70,
     timeout: float = 5,
+    use_cache: bool = True,
+    region: Optional[Region] = None,
 ) -> Optional[tuple[int, int]]:
     """Contrário do _aguardar_sumir - espera uma imagem aparecer na tela,
     checando a cada 0.3s, devolve a posição (ou None no timeout)."""
     deadline = time.time() + timeout
     while time.time() < deadline:
-        pos = locate(cache_key, *path_parts, confidence=confidence, base_dir=base_dir)
+        pos = locate(cache_key, *path_parts, confidence=confidence, base_dir=base_dir, use_cache=use_cache, region=region)
         if pos:
             return pos
         time.sleep(0.3)
@@ -728,13 +872,15 @@ def _aguardar_dog_e_clicar(timeout: float = 3) -> bool:
     aparecer e clica abaixo dele, na montaria/npc - posição de clique fixa
     (coord) não funciona porque o mapa muda de lugar (bug do próprio jogo).
     Offset escala com o tamanho do template achado (locate_box), não é
-    pixel fixo - acompanha resolução/zoom do mapa. Busca tela toda sempre.
+    pixel fixo - acompanha resolução/zoom do mapa. use_cache=False pelo
+    mesmo motivo - região cacheada de uma posição antiga do mapa não serve
+    pra próxima (mapa mudou de lugar), então busca tela toda sempre.
     Confidence mais baixo (0.65) porque o label é um texto pequeno,
     sensível a variação de zoom/AA da câmera."""
     started = time.time()
     while True:
         for name in _dog_templates():
-            box = locate_box(f"dog_ingame_{name}", name, confidence=0.65)
+            box = locate_box(f"dog_ingame_{name}", name, confidence=0.65, use_cache=False)
             if box:
                 target = (
                     box.left + box.width // 2,
@@ -924,6 +1070,7 @@ def processar_fim_partida() -> None:
 
 if __name__ == "__main__":
     threading.Thread(target=_watch_esc, daemon=True).start()
+    _cache_load()
 
     _log("processo iniciado")
     try:

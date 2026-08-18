@@ -92,10 +92,18 @@ REHOST_MAX          = int(CONFIG.get("rehost_max", 5))
 CICLOS_FEITOS       = int(CONFIG.get("ciclos", 0))
 PARTIDAS_CONCLUIDAS = int(CONFIG.get("partidas_concluidas", 0))
 
+# coords/: mesmo esquema do lobby.py — um arquivo de cache por resolução,
+# versionado (mesma resolução = mesma posição sempre).
 COORDS_DIR = "coords"
 os.makedirs(COORDS_DIR, exist_ok=True)
+CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION}_in_game.txt")
+try:
+    _RES_WIDTH = int(RESOLUTION.lower().split("x")[0])
+except Exception:
+    _RES_WIDTH = 1920
+CACHE_MARGIN      = max(60, round(60 * _RES_WIDTH / 1920))  # escala com a resolução (ver lobby.py)
 POLL_IN_GAME      = 2.0
-POLL_COUNT        = 4.0  # detecção de fim (count.png) em thread própria, isolada do farm, tela inteira. 4s pra não perder a tela de count que às vezes fica só ~5s visível. Ver monitorar_count
+POLL_COUNT        = 4.0  # detecção de fim (count.png) em thread própria, isolada do farm. Busca por região (barata) -> pode pollar rápido. 4s pra não perder a tela de count que às vezes fica só ~5s visível. Ver monitorar_count
 POLL_TESOURO      = 10.0
 POLL_STATUS       = 30.0
 POLL_ROSHAN       = 5.0
@@ -260,6 +268,69 @@ def _watch_esc() -> None:
     _matar_irmaos()
     os._exit(1)
 
+_coord_cache: dict[str, tuple[int, int]] = {}
+_cache_lock = threading.Lock()
+
+def _cache_load() -> None:
+    _coord_cache.clear()
+    if not os.path.exists(CACHE_FILE):
+        return
+    try:
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or "=" not in line:
+                    continue
+                name, coord = line.split("=", 1)
+                x_str, y_str = coord.split(",", 1)
+                _coord_cache[name] = (int(x_str), int(y_str))
+    except Exception:
+        pass
+
+def _cache_write() -> None:
+    tmp_file = CACHE_FILE + ".tmp"
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            for name, (cx, cy) in _coord_cache.items():
+                f.write(f"{name}={cx},{cy}\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, CACHE_FILE)
+    except Exception:
+        pass
+
+def _cache_save_entry(name: str, x: int, y: int) -> None:
+    with _cache_lock:
+        _coord_cache[name] = (x, y)
+        _cache_write()
+
+def _cache_invalidate(name: str) -> None:
+    with _cache_lock:
+        if name in _coord_cache:
+            del _coord_cache[name]
+            _cache_write()
+
+Region = tuple[int, int, int, int]
+
+def _calc_count_region() -> Region:
+    """Recorte onde o botão ViewSettle (count.png) aparece: faixa larga no
+    topo-centro da tela. Calculada do tamanho REAL da tela (não hardcoded),
+    então sobrevive a mudança de resolução/escala - foi o que quebrava as
+    tentativas antigas de busca por região (recorte menor que a imagem /
+    coords fora de escala -> nunca achava). Bem generosa de propósito:
+    x 34%-66%, y 3%-16% da tela. Pra afinar/ampliar é só mexer aqui."""
+    try:
+        w, h = pyautogui.size()
+    except Exception:
+        w, h = 1920, 1080
+    left   = int(w * 0.34)
+    top    = int(h * 0.03)
+    width  = int(w * 0.32)
+    height = int(h * 0.13)
+    return (left, top, width, height)
+
+COUNT_REGION = _calc_count_region()
+
 def _img(*parts: str) -> str:
     """Caminho dentro de IMG_DIR (dependente de idioma)."""
     return os.path.join(IMG_DIR, *parts)
@@ -268,19 +339,38 @@ def _global_img(*parts: str) -> str:
     """Caminho dentro de GLOBAL_DIR (independente de idioma, só por resolução)."""
     return os.path.join(GLOBAL_DIR, *parts)
 
-def _locate_raw(path: str, confidence: float) -> Optional[tuple[int, int]]:
-    # Sempre tela inteira - sem restrição de região/coordenada cacheada.
+def _locate_raw(path: str, confidence: float, region: Optional[Region] = None) -> Optional[tuple[int, int]]:
     try:
-        return pyautogui.locateCenterOnScreen(path, confidence=confidence)
+        return pyautogui.locateCenterOnScreen(path, confidence=confidence, region=region)
     except Exception:
         return None
 
-def locate(cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir: str = IMG_DIR) -> Optional[tuple[int, int]]:
+def locate(cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir: str = IMG_DIR, region: Optional[Region] = None) -> Optional[tuple[int, int]]:
     full_path = os.path.join(base_dir, *path_parts)
     if not os.path.exists(full_path):
         return None
+
+    # region fixa: busca só nesse recorte, ignora cache. Usado no count.png
+    # (botão ViewSettle, sempre no topo-centro) pra não varrer a tela toda.
+    if region is not None:
+        pos = _locate_raw(full_path, confidence, region=region)
+        _update_debug(cache_key, pos is not None)
+        return pos
+
+    cached = _coord_cache.get(cache_key)
+    if cached is not None:
+        cx, cy = cached
+        region: Region = (max(0, cx - CACHE_MARGIN), max(0, cy - CACHE_MARGIN), CACHE_MARGIN * 2, CACHE_MARGIN * 2)
+        pos = _locate_raw(full_path, confidence, region=region)
+        if pos:
+            _update_debug(cache_key, True)
+            return pos
+        _cache_invalidate(cache_key)
+
     pos = _locate_raw(full_path, confidence)
     _update_debug(cache_key, pos is not None)
+    if pos:
+        _cache_save_entry(cache_key, pos[0], pos[1])
     return pos
 
 def descansar_mouse() -> None:
@@ -421,14 +511,13 @@ def drag_item(src: tuple[int, int], dst: tuple[int, int], duration: float = 0.15
         except Exception:
             pass
 
+SLOT_CHECK_HALF = 30
+
 def is_slot_occupied(coord_base: tuple[int, int]) -> bool:
-    # coord_base não é mais usado pra restringir a busca - decisão explícita
-    # do usuário de nunca mais restringir imagem por região/coordenada,
-    # mesmo aqui (slot.png = marcador de slot VAZIO). Sem a região por slot,
-    # a função deixa de distinguir slot a slot: passa a responder a mesma
-    # coisa (existe algum slot vazio em algum lugar da tela?) pra qualquer
-    # coord_base recebido. Ciente do trade-off - ver conversa que decidiu isso.
-    return _locate_raw(_global_img("suporte", "slot.png"), confidence=0.75) is None
+    x, y = scale_coord(coord_base)
+    half = SLOT_CHECK_HALF
+    region: Region = (max(0, x - half), max(0, y - half), half * 2, half * 2)
+    return _locate_raw(_global_img("suporte", "slot.png"), confidence=0.75, region=region) is None
 
 def click_organizar() -> None:
     if ORGANIZAR_BASE is None:
@@ -793,10 +882,10 @@ def monitorar_count() -> None:
     Ao achar count.png: encerra os extras e passa a vez pro fim_game.py (conta
     a partida, cristal/equipamento, ciclos, decide fechar dota + voltar pro
     lobby ou puxar o in_game de novo)."""
-    _log(f"monitorar_count: iniciado (poll {POLL_COUNT}s, tela inteira)")
+    _log(f"monitorar_count: iniciado (poll {POLL_COUNT}s, região {COUNT_REGION})")
     while True:
         try:
-            pos_count = locate("count", "count.png", confidence=0.70)
+            pos_count = locate("count", "count.png", confidence=0.70, region=COUNT_REGION)
         except Exception:
             _log("monitorar_count: EXCEÇÃO:\n" + traceback.format_exc())
             pos_count = None
@@ -942,6 +1031,7 @@ def iniciar_partida():
 
 if __name__ == "__main__":
     threading.Thread(target=_watch_esc, daemon=True).start()
+    _cache_load()
 
     _log("processo iniciado")
     try:

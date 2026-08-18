@@ -193,8 +193,27 @@ _IMG_DIR_NO_RES = os.path.join("language", LANGUAGE, "lobby")
 
 IMG_DIR = _IMG_DIR_WITH_RES if os.path.exists(_IMG_DIR_WITH_RES) else _IMG_DIR_NO_RES
 
+# coords/: cache de coordenadas (posição da última imagem achada), um
+# arquivo por resolução. Dota renderiza em pixels reais, não segue a escala
+# de exibição do Windows (100%/125%/...), então a mesma resolução sempre
+# cai na mesma coordenada - esse arquivo é versionado (ver build.py/
+# .gitignore) pra já vir "quente" pra qualquer usuário na mesma resolução,
+# sem precisar escanear a tela inteira na primeira vez.
 COORDS_DIR = "coords"
 os.makedirs(COORDS_DIR, exist_ok=True)
+CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION}_lobby.txt")
+
+# Margem escala com a largura da tela: em resoluções ultrawide a lista de
+# lobbies desloca mais os itens, e a janela de 60px (base 1920x1080) errava
+# o alvo com mais frequência, caindo no fallback de scan em tela cheia
+# (bem mais caro em telas maiores) — daí a demora reportada em resoluções maiores.
+try:
+    _RES_WIDTH = int(RESOLUTION.lower().split("x")[0])
+except Exception:
+    _RES_WIDTH = 1920
+CACHE_MARGIN = max(
+    60, round(60 * _RES_WIDTH / 1920)
+)  # px ao redor da coord salva para a região de busca rápida
 
 def current_password() -> str:
     return PASSWORD_FIXED
@@ -326,27 +345,102 @@ def focus_dota() -> bool:
 
 
 # ==================================================
+# COORDINATE CACHE
+# ==================================================
+_coord_cache: dict[str, tuple[int, int]] = {}
+_cache_lock = threading.Lock()
+
+
+def _cache_load() -> None:
+    _coord_cache.clear()
+    if not os.path.exists(CACHE_FILE):
+        return
+    try:
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or "=" not in line:
+                    continue
+                name, coord = line.split("=", 1)
+                x_str, y_str = coord.split(",", 1)
+                _coord_cache[name] = (int(x_str), int(y_str))
+    except Exception:
+        pass
+
+
+def _cache_write() -> None:
+    # _clicker/_observer (threads paralelas em _refresh_until_game_appears) chamam
+    # locate() ao mesmo tempo; sem lock, duas escritas concorrentes no mesmo
+    # arquivo corrompem o cache (arquivo fica truncado/inválido).
+    with _cache_lock:
+        tmp_file = CACHE_FILE + ".tmp"
+        try:
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                f.writelines(f"{name}={cx},{cy}\n" for name, (cx, cy) in _coord_cache.items())
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_file, CACHE_FILE)
+        except Exception:
+            pass
+
+
+def _cache_save_entry(name: str, x: int, y: int) -> None:
+    _coord_cache[name] = (x, y)
+    _cache_write()
+
+
+def _cache_invalidate(name: str) -> None:
+    if name in _coord_cache:
+        del _coord_cache[name]
+        _cache_write()
+
+
+# ==================================================
 # IMAGE HELPERS
 # ==================================================
 def _img_path(name: str) -> str:
     return os.path.join(IMG_DIR, name)
 
 
-def _locate_raw(name: str, confidence: float) -> tuple[int, int] | None:
-    # Sempre tela inteira - sem restrição de região.
+Region = tuple[int, int, int, int]
+
+
+def _locate_raw(
+    name: str,
+    confidence: float,
+    region: Region | None = None,
+) -> tuple[int, int] | None:
     try:
-        return pyautogui.locateCenterOnScreen(_img_path(name), confidence=confidence)
+        return pyautogui.locateCenterOnScreen(
+            _img_path(name),
+            confidence=confidence,
+            region=region,
+        )
     except Exception:
         return None
 
 
 def locate(name: str, confidence: float = 0.7) -> tuple[int, int] | None:
-    # Sempre tela inteira - região restrita por coordenada cacheada dava
-    # falso negativo (janela mudou de posição, item deslocou etc) sem
-    # nenhum fallback visível pra quem tava debugando. Custo de CPU maior,
-    # mas correto sempre bate confiabilidade nesse bot.
+    cached = _coord_cache.get(name)
+
+    if cached is not None:
+        cx, cy = cached
+        region: Region = (
+            max(0, cx - CACHE_MARGIN),
+            max(0, cy - CACHE_MARGIN),
+            CACHE_MARGIN * 2,
+            CACHE_MARGIN * 2,
+        )
+        pos = _locate_raw(name, confidence, region=region)
+        if pos:
+            _update_debug(name, True)
+            return pos
+        _cache_invalidate(name)
+
     pos = _locate_raw(name, confidence)
     _update_debug(name, pos is not None)
+    if pos:
+        _cache_save_entry(name, pos[0], pos[1])
     return pos
 
 
@@ -881,6 +975,7 @@ def step_lobby() -> None:
 # ==================================================
 def main() -> None:
     threading.Thread(target=_watch_esc, daemon=True).start()
+    _cache_load()
 
     open_dota()
     step_menu()
