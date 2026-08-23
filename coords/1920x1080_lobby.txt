@@ -1,9 +1,9 @@
 buscar.png=470,832
 200.png=376,164
-att.png=1584,167
-aceitar.png=957,510
-fim.png=960,763
-image.png=1130,30
-lista.png=881,83
-lobby.png=920,834
-ok.png=1008,604
+att.png=1583,167
+fim.png=959,765
+image.png=1126,30
+lista.png=884,84
+sair.png=1697,960
+lobby.png=918,834
+ok.png=1004,604

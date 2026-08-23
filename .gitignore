@@ -14,6 +14,8 @@ bot_log.txt
 lobby_log.txt
 in_game_log.txt
 fim_game_log.txt
+logs/
+diag/
 users_config.json
 skills-lock.json
 .agents

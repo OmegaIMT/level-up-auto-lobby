@@ -40,7 +40,6 @@ import io
 import json
 import os
 import shutil
-import tempfile
 import time
 import urllib.request
 import urllib.error
@@ -90,6 +89,15 @@ REQUEST_TIMEOUT = 15  # segundos; rede ruim/off falha rápido e silencioso
 # Nunca sobrescreve estes — são estado local, não fazem parte do pacote
 # de build (build.py não gera nenhum deles).
 PROTECTED_PATHS = {"config.json", "status.json", "version.json"}
+
+# Pasta pra extrair o .zip baixado, DENTRO da própria instalação (não
+# tempfile.TemporaryDirectory() = %TEMP% do Windows) - o Defender pega os
+# .exe recém-extraídos no Temp do sistema com falso-positivo de ML
+# (Wacapew.A!ml) antes mesmo de _apply_update copiar pro lugar certo, porque
+# %TEMP% não tá coberto pela exclusão de antivírus que o usuário configura na
+# pasta de instalação. Extraindo aqui dentro, fica coberto pela mesma
+# exclusão. Nome começa com "." pra não confundir com pasta de dado real.
+LOCAL_TMP_DIR = ".update_tmp"
 
 
 @dataclass
@@ -311,11 +319,17 @@ def check_for_updates(
     if zip_bytes is None:
         return _fail(result, progress_cb, "falha ao baixar atualização")
 
+    tmp_dir = os.path.abspath(LOCAL_TMP_DIR)
     try:
-        with tempfile.TemporaryDirectory() as tmp_dir:
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        os.makedirs(tmp_dir, exist_ok=True)
+        try:
             with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
                 zf.extractall(tmp_dir)
             result.updated_files = _apply_update(tmp_dir)
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
     except Exception as e:
         return _fail(result, progress_cb, f"falha ao aplicar atualização: {e}")
 

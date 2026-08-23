@@ -27,7 +27,11 @@ HIDDEN_WINDOW.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 HIDDEN_WINDOW.wShowWindow = 0
 
 CONFIG_FILE = "config.json"
-LOG_FILE = "fim_game_log.txt"  # arquivo próprio (era bot_log.txt compartilhado) - console fica oculto (ShowWindow 0), sem isso não dá pra ver nada
+
+# LOGS_DIR: pasta de log de texto - mesmo esquema do lobby.py/in_game.py.
+LOGS_DIR = "logs"
+os.makedirs(LOGS_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOGS_DIR, "fim_game_log.txt")  # arquivo próprio (era bot_log.txt compartilhado) - console fica oculto (ShowWindow 0), sem isso não dá pra ver nada
 
 
 def _log(msg: str) -> None:
@@ -339,14 +343,30 @@ def _global_img(*parts: str) -> str:
     return os.path.join(GLOBAL_DIR, *parts)
 
 
+_ultima_excecao_locate: Optional[str] = None
+_ultima_excecao_locate_time = 0.0
+EXCECAO_LOCATE_LOG_INTERVAL = 30.0  # throttle - erro real (ex: cv2 ausente) repete a cada poll, não spammar
+
 def _locate_raw(
     path: str, confidence: float, region: Optional[Region] = None
 ) -> Optional[tuple[int, int]]:
+    global _ultima_excecao_locate, _ultima_excecao_locate_time
     try:
         return pyautogui.locateCenterOnScreen(
             path, confidence=confidence, region=region
         )
-    except Exception:
+    except Exception as e:
+        # ImageNotFoundException é o sinal NORMAL do pyautogui/pyscreeze pra
+        # "não achou a imagem" (pyscreeze levanta exceção em vez de devolver
+        # None por padrão) - não é erro, acontece toda busca que não bate.
+        # Só loga exceções DE VERDADE (cv2 ausente, imagem corrompida etc.).
+        if type(e).__name__ != "ImageNotFoundException":
+            msg = f"{path}: {type(e).__name__}: {e}"
+            now = time.time()
+            if msg != _ultima_excecao_locate or (now - _ultima_excecao_locate_time) > EXCECAO_LOCATE_LOG_INTERVAL:
+                _ultima_excecao_locate = msg
+                _ultima_excecao_locate_time = now
+                _log(f"_locate_raw: EXCEÇÃO ao buscar imagem - {msg}")
         return None
 
 
@@ -355,13 +375,16 @@ def locate(
     *path_parts: str,
     confidence: float = 0.75,
     base_dir: str = IMG_DIR,
-    use_cache: bool = True,
+    use_cache: bool = False,
     region: Optional[Region] = None,
 ) -> Optional[tuple[int, int]]:
-    """use_cache=False pula a região restrita ao redor da posição cacheada e
-    procura na tela inteira direto - usado nos popups do fim de wings
-    (cancel/confirm/go_it) porque a posição deles varia e a busca por
-    região tava dando falso negativo, deixando de clicar.
+    """use_cache=False (padrão) pula a região restrita ao redor da posição
+    cacheada e procura na tela inteira direto - virou padrão pra tudo (era só
+    dos popups do fim de wings - cancel/confirm/go_it - porque a posição
+    deles varia e a busca por região tava dando falso negativo, deixando de
+    clicar). Mesmo com use_cache=True o código já caía pra tela inteira se o
+    cache errasse, então isso só elimina a tentativa rápida (e inútil) via
+    coordenada antes de cada busca.
 
     region: recorte fixo (left, top, width, height) pra travar a busca numa
     faixa da tela - usado nos ícones de rank (b/a/s/ss/sss/ex), que sem
@@ -371,6 +394,7 @@ def locate(
     full_path = os.path.join(base_dir, *path_parts)
     if not os.path.exists(full_path):
         return None
+    nome_img = os.path.basename(full_path)
 
     if region is not None:
         pos = _locate_raw(full_path, confidence, region=region)
@@ -401,9 +425,17 @@ def locate(
 
 
 def _locate_box_raw(path: str, confidence: float, region: Optional[Region] = None):
+    global _ultima_excecao_locate, _ultima_excecao_locate_time
     try:
         return pyautogui.locateOnScreen(path, confidence=confidence, region=region)
-    except Exception:
+    except Exception as e:
+        if type(e).__name__ != "ImageNotFoundException":
+            msg = f"{path}: {type(e).__name__}: {e}"
+            now = time.time()
+            if msg != _ultima_excecao_locate or (now - _ultima_excecao_locate_time) > EXCECAO_LOCATE_LOG_INTERVAL:
+                _ultima_excecao_locate = msg
+                _ultima_excecao_locate_time = now
+                _log(f"_locate_box_raw: EXCEÇÃO ao buscar imagem - {msg}")
         return None
 
 
@@ -412,7 +444,7 @@ def locate_box(
     *path_parts: str,
     confidence: float = 0.75,
     base_dir: str = IMG_DIR,
-    use_cache: bool = True,
+    use_cache: bool = False,
 ):
     """Igual locate(), mas devolve a caixa (left, top, width, height) em vez
     do centro - usado quando o clique real não é no centro do template e
@@ -421,6 +453,7 @@ def locate_box(
     full_path = os.path.join(base_dir, *path_parts)
     if not os.path.exists(full_path):
         return None
+    nome_img = os.path.basename(full_path)
 
     if use_cache:
         cached = _coord_cache.get(cache_key)

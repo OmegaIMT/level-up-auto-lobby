@@ -26,7 +26,11 @@ HIDDEN_WINDOW.dwFlags     |= subprocess.STARTF_USESHOWWINDOW
 HIDDEN_WINDOW.wShowWindow  = 0
 
 CONFIG_FILE = "config.json"
-LOG_FILE = "in_game_log.txt"  # arquivo próprio (era bot_log.txt compartilhado) - console fica oculto (ShowWindow 0)
+
+# LOGS_DIR: pasta de log de texto (era log solto na raiz - agora em pasta própria).
+LOGS_DIR = "logs"
+os.makedirs(LOGS_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOGS_DIR, "in_game_log.txt")  # arquivo próprio (era bot_log.txt compartilhado) - console fica oculto (ShowWindow 0)
 
 def _log(msg: str) -> None:
     line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] in_game: {msg}"
@@ -35,21 +39,6 @@ def _log(msg: str) -> None:
             f.write(line + "\n")
     except Exception:
         pass
-
-DIAG_DIR = "diag"
-
-def _salvar_diagnostico(motivo: str) -> None:
-    """Tira screenshot da tela no momento em que o monitor desiste (timeout /
-    erro) pra distinguir 'dota travou/desconectou' de 'count.png não bateu'.
-    Salva em diag/ com timestamp no nome. Nunca derruba o fluxo se falhar."""
-    try:
-        os.makedirs(DIAG_DIR, exist_ok=True)
-        nome = f"{time.strftime('%Y%m%d_%H%M%S')}_{motivo}.png"
-        caminho = os.path.join(DIAG_DIR, nome)
-        pyautogui.screenshot().save(caminho)
-        _log(f"_salvar_diagnostico: screenshot salvo em {caminho}")
-    except Exception as e:
-        _log(f"_salvar_diagnostico: falhou ({e})")
 
 def load_config() -> dict:
     if not os.path.exists(CONFIG_FILE):
@@ -104,6 +93,7 @@ except Exception:
 CACHE_MARGIN      = max(60, round(60 * _RES_WIDTH / 1920))  # escala com a resolução (ver lobby.py)
 POLL_IN_GAME      = 2.0
 POLL_COUNT        = 4.0  # detecção de fim (count.png) em thread própria, isolada do farm. Busca por região (barata) -> pode pollar rápido. 4s pra não perder a tela de count que às vezes fica só ~5s visível. Ver monitorar_count
+COUNT_WAIT_FIRST  = 8 * 60 + 45  # 8min45s - espera antes de começar a checar count.png; partida normal dura ~11min, não faz sentido checar desde o início
 POLL_TESOURO      = 10.0
 POLL_STATUS       = 30.0
 POLL_ROSHAN       = 5.0
@@ -312,24 +302,12 @@ def _cache_invalidate(name: str) -> None:
 
 Region = tuple[int, int, int, int]
 
-def _calc_count_region() -> Region:
-    """Recorte onde o botão ViewSettle (count.png) aparece: faixa larga no
-    topo-centro da tela. Calculada do tamanho REAL da tela (não hardcoded),
-    então sobrevive a mudança de resolução/escala - foi o que quebrava as
-    tentativas antigas de busca por região (recorte menor que a imagem /
-    coords fora de escala -> nunca achava). Bem generosa de propósito:
-    x 34%-66%, y 3%-16% da tela. Pra afinar/ampliar é só mexer aqui."""
-    try:
-        w, h = pyautogui.size()
-    except Exception:
-        w, h = 1920, 1080
-    left   = int(w * 0.34)
-    top    = int(h * 0.03)
-    width  = int(w * 0.32)
-    height = int(h * 0.13)
-    return (left, top, width, height)
-
-COUNT_REGION = _calc_count_region()
+# count.png (ViewSettle) SEMPRE busca em tela inteira agora - region fixa
+# (COUNT_REGION) foi removida. Motivo: qualquer recorte que não cubra a
+# posição real do botão trava a detecção pra sempre (e é o suspeito nº1 do
+# "às vezes não detecta o fim da partida" - sem region não tem como errar o
+# recorte). Custo extra de CPU da busca full-screen é aceitável pra um poll
+# de POLL_COUNT segundos.
 
 def _img(*parts: str) -> str:
     """Caminho dentro de IMG_DIR (dependente de idioma)."""
@@ -339,16 +317,35 @@ def _global_img(*parts: str) -> str:
     """Caminho dentro de GLOBAL_DIR (independente de idioma, só por resolução)."""
     return os.path.join(GLOBAL_DIR, *parts)
 
+_ultima_excecao_locate: Optional[str] = None
+_ultima_excecao_locate_time = 0.0
+EXCECAO_LOCATE_LOG_INTERVAL = 30.0  # throttle - erro real (ex: cv2 ausente) repete a cada poll, não spammar
+
 def _locate_raw(path: str, confidence: float, region: Optional[Region] = None) -> Optional[tuple[int, int]]:
+    global _ultima_excecao_locate, _ultima_excecao_locate_time
     try:
         return pyautogui.locateCenterOnScreen(path, confidence=confidence, region=region)
-    except Exception:
+    except Exception as e:
+        # ImageNotFoundException é o sinal NORMAL do pyautogui/pyscreeze pra
+        # "não achou a imagem" (pyscreeze levanta exceção em vez de devolver
+        # None por padrão) - não é erro, acontece toda busca que não bate.
+        # Só loga (throttled) exceções DE VERDADE (cv2 ausente, arquivo de
+        # imagem corrompido etc.) - essas sim indicam ambiente quebrado, e
+        # antes ficavam mascaradas igual a um "não achou" comum.
+        if type(e).__name__ != "ImageNotFoundException":
+            msg = f"{path}: {type(e).__name__}: {e}"
+            now = time.time()
+            if msg != _ultima_excecao_locate or (now - _ultima_excecao_locate_time) > EXCECAO_LOCATE_LOG_INTERVAL:
+                _ultima_excecao_locate = msg
+                _ultima_excecao_locate_time = now
+                _log(f"_locate_raw: EXCEÇÃO ao buscar imagem - {msg}")
         return None
 
 def locate(cache_key: str, *path_parts: str, confidence: float = 0.75, base_dir: str = IMG_DIR, region: Optional[Region] = None) -> Optional[tuple[int, int]]:
     full_path = os.path.join(base_dir, *path_parts)
     if not os.path.exists(full_path):
         return None
+    nome_img = os.path.basename(full_path)
 
     # region fixa: busca só nesse recorte, ignora cache. Usado no count.png
     # (botão ViewSettle, sempre no topo-centro) pra não varrer a tela toda.
@@ -678,8 +675,15 @@ def carregar_imagens_tesouro() -> List[str]:
     return [img[1] for img in imagens]
 
 def encontrar_tesouro_principal() -> Optional[tuple[int, int]]:
+    """_locate_raw direto (NÃO locate()) - bypassa o cache de coordenada de
+    propósito. tesouro.png spawna em posição diferente a cada tesouro (não é
+    fixo na tela como hammer/pill) - mesmo bug do game.png no lobby.py: uma
+    coordenada cacheada de um spawn anterior aponta pra um lugar vazio e o
+    farm para de achar tesouro."""
+    tesouro_path = _global_img("suporte", "tesouro.png")
     for conf in (0.85, 0.8, 0.75, 0.6):
-        pos = locate("tesouro", "suporte", "tesouro.png", confidence=conf, base_dir=GLOBAL_DIR)
+        pos = _locate_raw(tesouro_path, confidence=conf)
+        _update_debug("tesouro", pos is not None)
         if pos:
             return pos
     return None
@@ -882,19 +886,57 @@ def monitorar_count() -> None:
     Ao achar count.png: encerra os extras e passa a vez pro fim_game.py (conta
     a partida, cristal/equipamento, ciclos, decide fechar dota + voltar pro
     lobby ou puxar o in_game de novo)."""
-    _log(f"monitorar_count: iniciado (poll {POLL_COUNT}s, região {COUNT_REGION})")
+    count_path = _img("count.png")
+    _log(f"monitorar_count: aguardando {COUNT_WAIT_FIRST}s antes de começar a checar count.png (partida normal dura ~11min)")
+    time.sleep(COUNT_WAIT_FIRST)
+    _log(f"monitorar_count: iniciado (poll {POLL_COUNT}s, busca SEMPRE tela inteira, imagem {count_path})")
+    if not os.path.exists(count_path):
+        _log(f"monitorar_count: AVISO - {count_path} NÃO EXISTE no disco (idioma/resolução errados?)")
+
+    tentativas = 0
+    LOG_A_CADA = 1  # loga toda tentativa (cada POLL_COUNT segundos) - debug do "count.png não acha"
+    CONFIDENCE_COUNT = 0.85  # busca em tela inteira aumenta risco de falso positivo (bateu em outro elemento azul da HUD, ex: (1764,771) fora de onde o botão real fica) - confidence mais alto reduz isso
+    CONFIRMACOES_NECESSARIAS = 2  # exige N detecções seguidas antes de considerar fim de verdade - um falso positivo aqui é caro (mata a partida no meio), debounce filtra ruído de 1 frame
+
     while True:
+        tentativas += 1
         try:
-            pos_count = locate("count", "count.png", confidence=0.70, region=COUNT_REGION)
+            # _locate_raw direto (NÃO locate()) - bypassa cache/região de
+            # propósito. locate() com region=None cai no cache de coordenada
+            # (mesmo problema disfarçado: busca só um recorte em volta da
+            # última posição achada). Aqui é sempre tela inteira, sem exceção.
+            pos_count = _locate_raw(count_path, confidence=CONFIDENCE_COUNT)
+            _update_debug("count", pos_count is not None)
         except Exception:
             _log("monitorar_count: EXCEÇÃO:\n" + traceback.format_exc())
             pos_count = None
 
         if pos_count:
-            _log("count.png achado - fim da partida, chamando fim_game")
-            _stop_extras.set()
-            _launch_fim_game()
-            os._exit(0)
+            _log(f"monitorar_count: count.png achado em {pos_count} (tentativa {tentativas}) - confirmando ({CONFIRMACOES_NECESSARIAS}x seguidas) antes de considerar fim de verdade")
+            confirmado = True
+            for i in range(2, CONFIRMACOES_NECESSARIAS + 1):
+                time.sleep(1.0)
+                pos_confirma = _locate_raw(count_path, confidence=CONFIDENCE_COUNT)
+                if not pos_confirma:
+                    _log(f"monitorar_count: FALSO POSITIVO descartado - count.png sumiu na confirmação {i}/{CONFIRMACOES_NECESSARIAS} (era {pos_count})")
+                    confirmado = False
+                    break
+                pos_count = pos_confirma
+
+            if confirmado:
+                msg = f"count.png CONFIRMADO em {pos_count} (tentativa {tentativas}) - fim da partida, chamando fim_game"
+                _log(msg)
+                print(f"[monitorar_count] {msg}")
+                _stop_extras.set()
+                _launch_fim_game()
+                os._exit(0)
+
+            pos_count = None
+
+        msg = f"monitorar_count: tentativa {tentativas} - count.png NAO achado (tela inteira)"
+        if tentativas % LOG_A_CADA == 0:
+            _log(msg)
+        print(f"[monitorar_count] {msg}")
 
         time.sleep(POLL_COUNT)
 
@@ -920,7 +962,6 @@ def monitor_match() -> None:
                 # Mesmo comportamento de quando atinge o max de partidas:
                 # fecha o dota, chama o lobby e salva mais um ciclo.
                 _log(f"monitor_match: erro '{nome_erro}' detectado - relançando")
-                _salvar_diagnostico(f"erro_{os.path.splitext(nome_erro)[0]}")
                 CICLOS_FEITOS += 1
                 save_status(0, REHOST_MAX, CICLOS_FEITOS)
                 save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
@@ -934,7 +975,6 @@ def monitor_match() -> None:
             # dessincronizando a contagem (bug visto no log: "partida 1/99
             # (ciclo 1)" repetido em vez de avançar de ciclo).
             _log(f"monitor_match: TIMEOUT_SEM_COUNT ({TIMEOUT_SEM_COUNT}s) - count.png nunca apareceu, relançando")
-            _salvar_diagnostico("timeout_sem_count")
             CICLOS_FEITOS += 1
             save_status(0, REHOST_MAX, CICLOS_FEITOS)
             save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)

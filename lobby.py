@@ -52,7 +52,6 @@ SALA_TIMEOUT = (
 FIM_TIMEOUT = (
     360  # fim.png não aparece (aceitar travado) por mais que isso reinicia o dota
 )
-ACCEPT_RETRIES = 8  # cliques máximos em aceitar.png até ele sumir (o clique às vezes não pega no Dota)
 DOTA_OPEN_TIMEOUT = 180  # tempo max esperando a janela do Dota 2 aparecer após steam://run/570 (subiu de 90: PC/Steam lento perdia a janela)
 DOTA_RETRY_INTERVAL = 10  # reenvia steam://run/570 se a janela ainda não apareceu (baixou de 15: mais tentativas dentro do timeout)
 DOTA_UPDATE_TIMEOUT = 1800  # se o Steam estiver baixando atualização do Dota, estende a espera até isso (30min) em vez de desistir
@@ -66,7 +65,11 @@ ADAPTIVE_DELAY_CAP = 3.0  # teto do buffer adaptativo abaixo, pra não herdar um
 SESSION_CONFIG_FILE = sys.argv[1] if len(sys.argv) > 1 else "config.json"
 STATUS_FILE = "status.json"  # status ao vivo, lido pelo painel.py
 LOCK_FILE = "bot.lock"  # sentinela compartilhado com painel.py
-LOG_FILE = "lobby_log.txt"  # arquivo próprio (era bot_log.txt compartilhado) - console fica oculto (ShowWindow 0), sem isso print() não vai a lugar nenhum
+
+# LOGS_DIR: pasta de log de texto - antes o log ia solto na raiz.
+LOGS_DIR = "logs"
+os.makedirs(LOGS_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOGS_DIR, "lobby_log.txt")  # arquivo próprio (era bot_log.txt compartilhado) - console fica oculto (ShowWindow 0), sem isso print() não vai a lugar nenhum
 
 
 def _log(msg: str) -> None:
@@ -193,6 +196,11 @@ _IMG_DIR_NO_RES = os.path.join("language", LANGUAGE, "lobby")
 
 IMG_DIR = _IMG_DIR_WITH_RES if os.path.exists(_IMG_DIR_WITH_RES) else _IMG_DIR_NO_RES
 
+# GLOBAL_DIR: imagens idênticas nos 4 idiomas (sem texto localizado) vivem
+# aqui uma vez só em vez de duplicadas em cada pasta de idioma - ver
+# _img_path. Mesmo esquema do in_game.py/fim_game.py.
+GLOBAL_DIR = os.path.join("language", "global", RESOLUTION, "lobby")
+
 # coords/: cache de coordenadas (posição da última imagem achada), um
 # arquivo por resolução. Dota renderiza em pixels reais, não segue a escala
 # de exibição do Windows (100%/125%/...), então a mesma resolução sempre
@@ -204,9 +212,9 @@ os.makedirs(COORDS_DIR, exist_ok=True)
 CACHE_FILE = os.path.join(COORDS_DIR, f"{RESOLUTION}_lobby.txt")
 
 # Margem escala com a largura da tela: em resoluções ultrawide a lista de
-# lobbies desloca mais os itens, e a janela de 60px (base 1920x1080) errava
-# o alvo com mais frequência, caindo no fallback de scan em tela cheia
-# (bem mais caro em telas maiores) — daí a demora reportada em resoluções maiores.
+# lobbies desloca mais os itens, e uma janela fixa de 60px (base 1920x1080)
+# errava o alvo com mais frequência, caindo no fallback de scan em tela
+# cheia (bem mais caro em telas maiores).
 try:
     _RES_WIDTH = int(RESOLUTION.lower().split("x")[0])
 except Exception:
@@ -399,10 +407,22 @@ def _cache_invalidate(name: str) -> None:
 # IMAGE HELPERS
 # ==================================================
 def _img_path(name: str) -> str:
-    return os.path.join(IMG_DIR, name)
+    # Se não existir na pasta do idioma, cai pro global (imagem idêntica nos
+    # 4 idiomas, movida pra lá uma vez só - ver GLOBAL_DIR).
+    caminho = os.path.join(IMG_DIR, name)
+    if not os.path.exists(caminho):
+        global_path = os.path.join(GLOBAL_DIR, name)
+        if os.path.exists(global_path):
+            return global_path
+    return caminho
 
 
 Region = tuple[int, int, int, int]
+
+
+_ultima_excecao_locate: str | None = None
+_ultima_excecao_locate_time = 0.0
+EXCECAO_LOCATE_LOG_INTERVAL = 30.0  # throttle - erro real (ex: cv2 ausente) repete a cada poll, não spammar
 
 
 def _locate_raw(
@@ -410,17 +430,38 @@ def _locate_raw(
     confidence: float,
     region: Region | None = None,
 ) -> tuple[int, int] | None:
+    global _ultima_excecao_locate, _ultima_excecao_locate_time
     try:
         return pyautogui.locateCenterOnScreen(
             _img_path(name),
             confidence=confidence,
             region=region,
         )
-    except Exception:
+    except Exception as e:
+        # ImageNotFoundException é o sinal NORMAL do pyautogui/pyscreeze pra
+        # "não achou a imagem" (pyscreeze levanta exceção em vez de devolver
+        # None por padrão) - não é erro, acontece toda busca que não bate
+        # (ex: game.png antes do host iniciar a partida). Só loga exceções DE
+        # VERDADE (cv2 ausente, imagem corrompida etc.) - mesmo fix do
+        # in_game.py/fim_game.py.
+        if type(e).__name__ != "ImageNotFoundException":
+            msg = f"{name}: {type(e).__name__}: {e}"
+            now = time.time()
+            if msg != _ultima_excecao_locate or (now - _ultima_excecao_locate_time) > EXCECAO_LOCATE_LOG_INTERVAL:
+                _ultima_excecao_locate = msg
+                _ultima_excecao_locate_time = now
+                _log(f"_locate_raw: EXCEÇÃO ao buscar imagem - {msg}")
         return None
 
 
 def locate(name: str, confidence: float = 0.7) -> tuple[int, int] | None:
+    """Usa a coordenada cacheada (se existir) pra restringir a busca a uma
+    região pequena em volta da última posição achada - bem mais rápido que
+    varrer a tela inteira. Se a região não bater (posição mudou, ou o
+    template é maior que a margem e pyautogui reclama de "needle dimension(s)
+    exceed the haystack" - erro real, não ImageNotFoundException, mas
+    _locate_raw já trata como "não achou"), invalida o cache e cai pro scan
+    de tela cheia - se auto-corrige."""
     cached = _coord_cache.get(name)
 
     if cached is not None:
@@ -484,6 +525,17 @@ def wait_disappear(
             return True
         time.sleep(0.15)
     return False
+
+
+def descansar_mouse() -> None:
+    """Canto da tela, longe do botão clicado - mesmo esquema do in_game.py/
+    fim_game.py. Usado depois de clicar aceitar.png: com o cursor em cima do
+    botão às vezes dá pra confundir visualmente (e no screenshot) se ele
+    sumiu de verdade ou só tá coberto pelo próprio mouse."""
+    try:
+        pyautogui.moveTo(20, 20)
+    except Exception:
+        pass
 
 
 def safe_click(pos: tuple[int, int] | None, pause: float = CLICK_PAUSE, duration: float = 0.0) -> bool:
@@ -894,17 +946,21 @@ def step_lobby() -> None:
                 # sem duration o cursor teleporta e o Dota não registra hover
                 # antes do click, fazendo o "aceitar" às vezes não pegar.
                 # Clica e reconfirma: se aceitar.png ainda estiver na tela, o
-                # clique não pegou - clica de novo até sumir (teto ACCEPT_RETRIES)
-                # em vez de cair direto no _accept_loop e travar até FIM_TIMEOUT.
+                # clique não pegou - clica de novo, SEM TETO, até sumir de
+                # verdade (era limitado a ACCEPT_RETRIES tentativas e caía pro
+                # _accept_loop mesmo com aceitar.png ainda óbvio na tela).
                 _log("step_lobby: aceitar.png achado - clicando")
-                for tentativa in range(1, ACCEPT_RETRIES + 1):
+                tentativa = 0
+                while aceitar:
+                    tentativa += 1
                     safe_click(aceitar, pause=GAME_ENTER_PAUSE, duration=0.1)
+                    descansar_mouse()
                     time.sleep(POLL_FAST)
                     aceitar = locate("aceitar.png")
                     if not aceitar:
                         _log(f"step_lobby: aceitar sumiu na tentativa {tentativa}")
                         break
-                    _log(f"step_lobby: aceitar ainda na tela (tentativa {tentativa}/{ACCEPT_RETRIES}) - clicando de novo")
+                    _log(f"step_lobby: aceitar ainda na tela (tentativa {tentativa}) - clicando de novo")
                 completed = _accept_loop()
                 if completed:
                     return

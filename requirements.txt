@@ -1,3 +1,4 @@
-PyAutoGUI
+pyautogui
 opencv-python
+pillow
 pyinstaller

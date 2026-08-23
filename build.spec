@@ -1,12 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-def _analysis(script):
+def _analysis(script, hiddenimports=None):
     return Analysis(
         [script],
         pathex=[],
         binaries=[],
         datas=[],
-        hiddenimports=[],
+        hiddenimports=hiddenimports or [],
         hookspath=[],
         hooksconfig={},
         runtime_hooks=[],
@@ -33,11 +33,32 @@ def _exe(pyz, a, name):
         icon=['level-up.ico'],
     )
 
+# cv2 (opencv-python): pyautogui/pyscreeze só importa por dentro, condicionado
+# a locateOnScreen(confidence=...) - PyInstaller às vezes não pega essa
+# dependência sozinho, e sem cv2 empacotado TODA busca de imagem com
+# confidence falha com exceção (antes mascarada como "imagem não achada" -
+# ver fix em in_game.py/fim_game.py _locate_raw). Forçando aqui pra nunca
+# mais sumir de um build silenciosamente.
+_CV2 = ['cv2']
+
+# DLL de vídeo do opencv (decoder ffmpeg) - vem de brinde no pacote, o bot
+# NUNCA usa (só faz matchTemplate em screenshot estático, não vídeo). É o
+# alvo clássico de falso-positivo de antivírus (Defender adora colocar
+# opencv_videoio_ffmpeg*.dll em quarentena) - tirando do build elimina a DLL
+# problemática sem tirar o cv2 de verdade (mantém a busca por confidence
+# funcionando normal).
+def _strip_ffmpeg_dll(binaries):
+    return [b for b in binaries if 'ffmpeg' not in b[0].lower()]
+
 a_start    = _analysis('start.py')
-a_in_game  = _analysis('in_game.py')
-a_fim_game = _analysis('fim_game.py')
-a_lobby    = _analysis('lobby.py')
+a_in_game  = _analysis('in_game.py', hiddenimports=_CV2)
+a_fim_game = _analysis('fim_game.py', hiddenimports=_CV2)
+a_lobby    = _analysis('lobby.py', hiddenimports=_CV2)
 a_painel   = _analysis('painel.py')
+
+a_in_game.binaries  = _strip_ffmpeg_dll(a_in_game.binaries)
+a_fim_game.binaries = _strip_ffmpeg_dll(a_fim_game.binaries)
+a_lobby.binaries    = _strip_ffmpeg_dll(a_lobby.binaries)
 
 pyz_start    = PYZ(a_start.pure)
 pyz_in_game  = PYZ(a_in_game.pure)
