@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import glob
 import heapq
 import threading
 import traceback
@@ -69,13 +70,19 @@ SUPORTE    = bool(CONFIG.get("support", True))
 CENTRO     = bool(CONFIG.get("center", False))
 ROSHAN     = bool(CONFIG.get("roshan", False))
 
-# IMG_DIR: agora só guarda o que continua dependente de idioma (count).
+# IMG_DIR: só guarda o que continua dependente de idioma e é usado DURANTE a
+# partida - hoje só shop.png (fim de partida vive em CICLO_DIR, pasta irmã).
 IMG_DIR = os.path.join("language", LANGUAGE, RESOLUTION, "in_game")
 
 # GLOBAL_DIR: imagens independentes de idioma, só dependem da resolução.
 # Aqui vivem: fonte.png, a pasta "suporte" inteira (hammer/pill/tesouro/slot),
 # a pasta "event" e a pasta "error".
 GLOBAL_DIR = os.path.join("language", "global", RESOLUTION)
+
+# CICLO_DIR: imagens de fim de partida/ciclo (bonus, count, dog*) - dependente
+# de idioma, pasta própria irmã de in_game/fim_game (language/<lang>/<res>/ciclo),
+# não uma subpasta de IMG_DIR.
+CICLO_DIR = os.path.join("language", LANGUAGE, RESOLUTION, "ciclo")
 
 REHOST_MAX          = int(CONFIG.get("rehost_max", 5))
 CICLOS_FEITOS       = int(CONFIG.get("ciclos", 0))
@@ -302,16 +309,12 @@ def _cache_invalidate(name: str) -> None:
 
 Region = tuple[int, int, int, int]
 
-# count.png (ViewSettle) SEMPRE busca em tela inteira agora - region fixa
-# (COUNT_REGION) foi removida. Motivo: qualquer recorte que não cubra a
-# posição real do botão trava a detecção pra sempre (e é o suspeito nº1 do
-# "às vezes não detecta o fim da partida" - sem region não tem como errar o
-# recorte). Custo extra de CPU da busca full-screen é aceitável pra um poll
-# de POLL_COUNT segundos.
-
-def _img(*parts: str) -> str:
-    """Caminho dentro de IMG_DIR (dependente de idioma)."""
-    return os.path.join(IMG_DIR, *parts)
+# count*.png (ViewSettle, ver _count_templates) SEMPRE busca em tela inteira
+# agora - region fixa (COUNT_REGION) foi removida. Motivo: qualquer recorte
+# que não cubra a posição real do botão trava a detecção pra sempre (e é o
+# suspeito nº1 do "às vezes não detecta o fim da partida" - sem region não
+# tem como errar o recorte). Custo extra de CPU da busca full-screen é
+# aceitável pra um poll de POLL_COUNT segundos.
 
 def _global_img(*parts: str) -> str:
     """Caminho dentro de GLOBAL_DIR (independente de idioma, só por resolução)."""
@@ -875,65 +878,82 @@ def verificar_erro() -> Optional[str]:
             return nome
     return None
 
+def _count_templates() -> list[str]:
+    """count.png, count_1.png, count_2.png... - mesmo esquema de
+    _dog_templates (fim_game.py): lista tudo que existir em ciclo/ que
+    combine com o padrão, na ordem, pra aguentar variantes da tela de
+    ViewSettle sem precisar mexer em código."""
+    return sorted(glob.glob(os.path.join(CICLO_DIR, "count*.png")))
+
 def monitorar_count() -> None:
     """Detecção de fim de partida ISOLADA do farm: thread própria que só vigia
-    count.png a cada POLL_COUNT segundos, sem depender de tesouro/status/roshan.
-    Se o farm travar (parar de achar tesouro etc.), esta thread continua rodando
-    e detecta o fim normalmente - era a cascata que faltava quebrar (bug do log:
-    farm travava -> count nunca era checado -> 80min de timeout cego). Mesma
-    ideia do monitorar_count_infinito do bot original (v2.x).
+    o array de imagens de count (ver _count_templates) a cada POLL_COUNT
+    segundos, sem depender de tesouro/status/roshan. Se o farm travar (parar
+    de achar tesouro etc.), esta thread continua rodando e detecta o fim
+    normalmente - era a cascata que faltava quebrar (bug do log: farm travava
+    -> count nunca era checado -> 80min de timeout cego). Mesma ideia do
+    monitorar_count_infinito do bot original (v2.x).
 
-    Ao achar count.png: encerra os extras e passa a vez pro fim_game.py (conta
-    a partida, cristal/equipamento, ciclos, decide fechar dota + voltar pro
-    lobby ou puxar o in_game de novo)."""
-    count_path = _img("count.png")
-    _log(f"monitorar_count: aguardando {COUNT_WAIT_FIRST}s antes de começar a checar count.png (partida normal dura ~11min)")
+    Ao achar alguma imagem de count: encerra os extras e passa a vez pro
+    fim_game.py (conta a partida, cristal/equipamento, ciclos, decide fechar
+    dota + voltar pro lobby ou puxar o in_game de novo)."""
+    count_paths = _count_templates()
+    _log(f"monitorar_count: aguardando {COUNT_WAIT_FIRST}s antes de começar a checar count (partida normal dura ~11min)")
     time.sleep(COUNT_WAIT_FIRST)
-    _log(f"monitorar_count: iniciado (poll {POLL_COUNT}s, busca SEMPRE tela inteira, imagem {count_path})")
-    if not os.path.exists(count_path):
-        _log(f"monitorar_count: AVISO - {count_path} NÃO EXISTE no disco (idioma/resolução errados?)")
+    _log(f"monitorar_count: iniciado (poll {POLL_COUNT}s, busca SEMPRE tela inteira, imagens {count_paths})")
+    if not count_paths:
+        _log(f"monitorar_count: AVISO - nenhuma imagem count*.png em {CICLO_DIR} (idioma/resolução errados?)")
 
     tentativas = 0
     LOG_A_CADA = 1  # loga toda tentativa (cada POLL_COUNT segundos) - debug do "count.png não acha"
-    CONFIDENCE_COUNT = 0.85  # busca em tela inteira aumenta risco de falso positivo (bateu em outro elemento azul da HUD, ex: (1764,771) fora de onde o botão real fica) - confidence mais alto reduz isso
+    CONFIDENCE_COUNT = 0.8  # busca em tela inteira aumenta risco de falso positivo (bateu em outro elemento azul da HUD, ex: (1764,771) fora de onde o botão real fica) - confidence mais alto reduz isso, mas alto demais falha em achar no 2º ciclo em diante (variação de brilho/estado da tela)
     CONFIRMACOES_NECESSARIAS = 2  # exige N detecções seguidas antes de considerar fim de verdade - um falso positivo aqui é caro (mata a partida no meio), debounce filtra ruído de 1 frame
+
+    def _buscar() -> Optional[tuple[str, tuple[int, int]]]:
+        # _locate_raw direto (NÃO locate()) - bypassa cache/região de
+        # propósito. locate() com region=None cai no cache de coordenada
+        # (mesmo problema disfarçado: busca só um recorte em volta da
+        # última posição achada). Aqui é sempre tela inteira, sem exceção.
+        # Percorre o array de imagens até a primeira bater.
+        for path in count_paths:
+            pos = _locate_raw(path, confidence=CONFIDENCE_COUNT)
+            if pos:
+                return path, pos
+        return None
 
     while True:
         tentativas += 1
         try:
-            # _locate_raw direto (NÃO locate()) - bypassa cache/região de
-            # propósito. locate() com region=None cai no cache de coordenada
-            # (mesmo problema disfarçado: busca só um recorte em volta da
-            # última posição achada). Aqui é sempre tela inteira, sem exceção.
-            pos_count = _locate_raw(count_path, confidence=CONFIDENCE_COUNT)
-            _update_debug("count", pos_count is not None)
+            achado = _buscar()
+            _update_debug("count", achado is not None)
         except Exception:
             _log("monitorar_count: EXCEÇÃO:\n" + traceback.format_exc())
-            pos_count = None
+            achado = None
 
-        if pos_count:
-            _log(f"monitorar_count: count.png achado em {pos_count} (tentativa {tentativas}) - confirmando ({CONFIRMACOES_NECESSARIAS}x seguidas) antes de considerar fim de verdade")
+        if achado:
+            count_path, pos_count = achado
+            _log(f"monitorar_count: {os.path.basename(count_path)} achado em {pos_count} (tentativa {tentativas}) - confirmando ({CONFIRMACOES_NECESSARIAS}x seguidas) antes de considerar fim de verdade")
             confirmado = True
             for i in range(2, CONFIRMACOES_NECESSARIAS + 1):
                 time.sleep(1.0)
                 pos_confirma = _locate_raw(count_path, confidence=CONFIDENCE_COUNT)
                 if not pos_confirma:
-                    _log(f"monitorar_count: FALSO POSITIVO descartado - count.png sumiu na confirmação {i}/{CONFIRMACOES_NECESSARIAS} (era {pos_count})")
+                    _log(f"monitorar_count: FALSO POSITIVO descartado - {os.path.basename(count_path)} sumiu na confirmação {i}/{CONFIRMACOES_NECESSARIAS} (era {pos_count})")
                     confirmado = False
                     break
                 pos_count = pos_confirma
 
             if confirmado:
-                msg = f"count.png CONFIRMADO em {pos_count} (tentativa {tentativas}) - fim da partida, chamando fim_game"
+                msg = f"{os.path.basename(count_path)} CONFIRMADO em {pos_count} (tentativa {tentativas}) - fim da partida, chamando fim_game"
                 _log(msg)
                 print(f"[monitorar_count] {msg}")
                 _stop_extras.set()
                 _launch_fim_game()
                 os._exit(0)
 
-            pos_count = None
+            achado = None
 
-        msg = f"monitorar_count: tentativa {tentativas} - count.png NAO achado (tela inteira)"
+        msg = f"monitorar_count: tentativa {tentativas} - nenhuma imagem count achada (tela inteira)"
         if tentativas % LOG_A_CADA == 0:
             _log(msg)
         print(f"[monitorar_count] {msg}")
@@ -1009,7 +1029,7 @@ def _bonus_sumiu(timeout: float = BONUS_DISAPPEAR_TIMEOUT) -> bool:
     """Espera bonus.png sumir da tela (depois do clique), até timeout."""
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if not locate("bonus", "bonus.png", confidence=0.75):
+        if not locate("bonus", "bonus.png", confidence=0.75, base_dir=CICLO_DIR):
             return True
         time.sleep(0.3)
     return False
@@ -1023,7 +1043,7 @@ def limpar_bonus_inicial(timeout: float = BONUS_INICIAL_TIMEOUT) -> None:
     cliques = 0
     while time.time() < deadline:
         try:
-            pos = locate("bonus", "bonus.png", confidence=0.75)
+            pos = locate("bonus", "bonus.png", confidence=0.75, base_dir=CICLO_DIR)
         except Exception:
             _log("limpar_bonus_inicial: EXCEÇÃO:\n" + traceback.format_exc())
             return

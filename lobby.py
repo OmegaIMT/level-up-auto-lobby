@@ -995,6 +995,7 @@ def step_lobby() -> None:
         game = _refresh_until_game_appears()
         if not game:
             _log("240 tentativas de ATT sem achar game.png - refazendo fluxo completo (sair, senha, filtro)")
+            focus_dota()
             step_menu()
             step_password()
             _proceed_to_filter()

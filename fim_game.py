@@ -69,12 +69,19 @@ def save_config_update(**kwargs) -> None:
 LANGUAGE = CONFIG.get("language", "pt-br")
 RESOLUTION = CONFIG.get("resolution", "1920x1080")
 
-# IMG_DIR: bonus.png ("I am the champion"), dependente de idioma.
+# IMG_DIR: pasta in_game (dependente de idioma) - hoje sem uso direto neste
+# arquivo, só serve de default pros parâmetros base_dir abaixo.
 IMG_DIR = os.path.join("language", LANGUAGE, RESOLUTION, "in_game")
 
+# CICLO_DIR: imagens de fim de partida/ciclo - bonus.png ("I am the
+# champion") e dog*.png (label do Endless Trial no mapa) - pasta própria
+# irmã de in_game/fim_game (mesmo esquema do in_game.py), NÃO subpasta de
+# IMG_DIR.
+CICLO_DIR = os.path.join("language", LANGUAGE, RESOLUTION, "ciclo")
+
 # FIM_GAME_IMG_DIR: batch/cancel/confirm/go_it.png (botões de texto da
-# compra em lote de wings) - dependente de idioma, pasta própria (separada
-# de IMG_DIR/in_game).
+# compra em lote de wings) e endless.png (confirmar mapa Endless Trial) -
+# dependente de idioma, pasta própria (separada de IMG_DIR/in_game).
 FIM_GAME_IMG_DIR = os.path.join("language", LANGUAGE, RESOLUTION, "fim_game")
 
 # GLOBAL_DIR: fonte.png (início da próxima partida), independente de idioma.
@@ -600,20 +607,20 @@ def _bonus_watcher(
             _log(f"_bonus_watcher: TIMEOUT ({timeout}s) - clicou {cliques}/{vezes} bonus")
             return
         try:
-            pos = locate("bonus", "bonus.png", confidence=0.75)
+            pos = locate("bonus", "bonus.png", confidence=0.75, base_dir=CICLO_DIR)
             if pos:
                 _log(f"_bonus_watcher: bonus.png achou {pos} - clicando (wait_once={wait_once})")
                 click_pos(pos, 0.5)
                 _bonus_interrupt.set()
                 if _em_equipamento.is_set() and not _aguardar_sumir(
-                    "bonus", "bonus.png", confidence=0.75, timeout=BONUS_DISAPPEAR_TIMEOUT
+                    "bonus", "bonus.png", confidence=0.75, timeout=BONUS_DISAPPEAR_TIMEOUT, base_dir=CICLO_DIR
                 ):
                     _clicar_vender(EQUIP_COORDS, "closer", 0.5)
-                    pos2 = locate("bonus", "bonus.png", confidence=0.75)
+                    pos2 = locate("bonus", "bonus.png", confidence=0.75, base_dir=CICLO_DIR)
                     if pos2:
                         click_pos(pos2, 0.5)
                         _aguardar_sumir(
-                            "bonus", "bonus.png", confidence=0.75, timeout=BONUS_DISAPPEAR_TIMEOUT
+                            "bonus", "bonus.png", confidence=0.75, timeout=BONUS_DISAPPEAR_TIMEOUT, base_dir=CICLO_DIR
                         )
                 if wait_once:
                     cliques += 1
@@ -622,7 +629,7 @@ def _bonus_watcher(
                     # Ainda faltam bonus: espera o atual sumir antes de voltar
                     # a procurar, pra não clicar de novo no mesmo popup.
                     _aguardar_sumir(
-                        "bonus", "bonus.png", confidence=0.75, timeout=BONUS_DISAPPEAR_TIMEOUT
+                        "bonus", "bonus.png", confidence=0.75, timeout=BONUS_DISAPPEAR_TIMEOUT, base_dir=CICLO_DIR
                     )
         except Exception:
             pass
@@ -833,11 +840,11 @@ ENDLESS_DISAPPEAR_TIMEOUT = 5  # após clicar em endless.png, tempo max esperand
 
 
 def _aguardar_sumir(
-    cache_key: str, *path_parts: str, confidence: float = 0.75, timeout: float = 5
+    cache_key: str, *path_parts: str, confidence: float = 0.75, timeout: float = 5, base_dir: str = IMG_DIR
 ) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if not locate(cache_key, *path_parts, confidence=confidence):
+        if not locate(cache_key, *path_parts, confidence=confidence, base_dir=base_dir):
             return True
         time.sleep(0.1)
     return False
@@ -864,19 +871,19 @@ def _aguardar_aparecer(
 
 
 def _aguardar_endless_e_clicar(timeout: float = 60) -> bool:
-    """Espera language/pt-br/.../in_game/endless.png aparecer e clica (usado
+    """Espera language/pt-br/.../fim_game/endless.png aparecer e clica (usado
     duas vezes: seleção do mapa e depois pra confirmar/entrar). Depois do
     clique confirma que o endless.png sumiu da tela antes de seguir - clique
     perdido (jogo não registrou) deixava o fluxo seguir cego achando que
     tinha entrado; se não sumir, tenta clicar de novo."""
     started = time.time()
     while True:
-        pos = locate("endless_ingame", "endless.png", confidence=0.75)
+        pos = locate("endless_ingame", "endless.png", confidence=0.75, base_dir=FIM_GAME_IMG_DIR)
         if pos:
             _log(f"_aguardar_endless_e_clicar: endless.png achou {pos} - clicando")
             click_pos(pos, delay_after=ENDLESS_CLICK_DELAY, rest=False)
             if _aguardar_sumir(
-                "endless_ingame", "endless.png", confidence=0.75, timeout=ENDLESS_DISAPPEAR_TIMEOUT
+                "endless_ingame", "endless.png", confidence=0.75, timeout=ENDLESS_DISAPPEAR_TIMEOUT, base_dir=FIM_GAME_IMG_DIR
             ):
                 return True
             _log("_aguardar_endless_e_clicar: endless.png NAO sumiu depois do clique - tentando de novo")
@@ -896,7 +903,7 @@ def _dog_templates() -> list[str]:
     """dog.png, dog_1.png, dog_2.png... - o texto do label não muda, mas a
     montaria embaixo é animada (pose diferente a cada captura), então um
     template só não bate sempre. Lista tudo que existir, na ordem."""
-    paths = sorted(glob.glob(os.path.join(IMG_DIR, "dog*.png")))
+    paths = sorted(glob.glob(os.path.join(CICLO_DIR, "dog*.png")))
     return [os.path.basename(p) for p in paths]
 
 
@@ -913,7 +920,7 @@ def _aguardar_dog_e_clicar(timeout: float = 3) -> bool:
     started = time.time()
     while True:
         for name in _dog_templates():
-            box = locate_box(f"dog_ingame_{name}", name, confidence=0.65, use_cache=False)
+            box = locate_box(f"dog_ingame_{name}", name, confidence=0.65, use_cache=False, base_dir=CICLO_DIR)
             if box:
                 target = (
                     box.left + box.width // 2,
