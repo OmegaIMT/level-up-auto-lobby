@@ -194,6 +194,9 @@ def apply_saved_config(saved: dict) -> None:
     entry_filtro.delete(0, "end")
     entry_filtro.insert(0, str(saved.get("filtro", "")))
 
+    entry_conexao.delete(0, "end")
+    entry_conexao.insert(0, str(saved.get("conexao_min", 0)))
+
     saved_language_folder = saved.get("language", "pt-br")
     saved_language_display = LANGUAGES_REVERSE.get(saved_language_folder)
     if saved_language_display:
@@ -236,6 +239,7 @@ def atualizar_interface_idioma(event=None) -> None:
     # idioma (definido na criação do widget, ver UI INITIALIZATION) - não
     # entra aqui.
     lbl_filtro.config(text=TEXT.get("filter", "Filtro"))
+    lbl_conexao.config(text=TEXT.get("connection_time", "Conexão (min)"))
     lbl_language.config(text=TEXT.get("language", "Idioma"))
     lbl_resolution.config(text=TEXT.get("resolution", "Resolução"))
     chk_crystal.config(text=TEXT.get("crystal", "Cristal"))
@@ -327,9 +331,16 @@ def start() -> None:
     pw1 = entry_pw1.get().strip()
     rehost = entry_rehost.get().strip() or "1"
     filtro = entry_filtro.get().strip()
+    conexao_raw = entry_conexao.get().strip().replace(",", ".") or "0"
 
     if not rehost.isdigit() or int(rehost) < 1:
         label_status.config(text=TEXT.get("error_rehost", "Error"), foreground="red")
+        return
+
+    try:
+        conexao_min = max(0.0, float(conexao_raw))
+    except ValueError:
+        label_status.config(text=TEXT.get("error_conexao", "Error"), foreground="red")
         return
 
     language_display = language_var.get()
@@ -339,6 +350,7 @@ def start() -> None:
     config = {
         "passwords": pw1,
         "filtro": filtro,
+        "conexao_min": conexao_min,
         "rehost_max": int(rehost) if rehost.isdigit() else 1,
         "partidas_concluidas": 0,
         "ciclos": 0,
@@ -508,31 +520,41 @@ if __name__ == "__main__":
     frame = ttk.Frame(content)
     frame.pack(side="left", fill="both", expand=True)
 
-    # Campo de Senha
+    # Linha Senha + Filtro (lado a lado, metade cada)
     row_passwords = ttk.Frame(frame)
     row_passwords.pack(fill="x", pady=(0, 10))
-    lbl_pw1 = ttk.Label(row_passwords)
+
+    col_pw1 = ttk.Frame(row_passwords)
+    col_pw1.pack(side="left", fill="x", expand=True)
+    lbl_pw1 = ttk.Label(col_pw1)
     lbl_pw1.pack(anchor="w")
-    entry_pw1 = ttk.Entry(row_passwords)
+    entry_pw1 = ttk.Entry(col_pw1)
     entry_pw1.pack(fill="x")
 
-    # Linha Re-Host + Filtro (lado a lado, metade cada)
-    row_rehost_filtro = ttk.Frame(frame)
-    row_rehost_filtro.pack(fill="x", pady=(0, 10))
+    col_filtro = ttk.Frame(row_passwords)
+    col_filtro.pack(side="left", fill="x", expand=True, padx=(10, 0))
+    lbl_filtro = ttk.Label(col_filtro)
+    lbl_filtro.pack(anchor="w")
+    entry_filtro = ttk.Entry(col_filtro)
+    entry_filtro.pack(fill="x")
 
-    col_rehost = ttk.Frame(row_rehost_filtro)
+    # Linha Re-Host + Conexão (lado a lado, metade cada)
+    row_rehost_conexao = ttk.Frame(frame)
+    row_rehost_conexao.pack(fill="x", pady=(0, 10))
+
+    col_rehost = ttk.Frame(row_rehost_conexao)
     col_rehost.pack(side="left", fill="x", expand=True)
     lbl_rehost = ttk.Label(col_rehost, text="Re-Lobby")  # global, não traduzido
     lbl_rehost.pack(anchor="w")
     entry_rehost = ttk.Entry(col_rehost)
     entry_rehost.pack(fill="x")
 
-    col_filtro = ttk.Frame(row_rehost_filtro)
-    col_filtro.pack(side="left", fill="x", expand=True, padx=(10, 0))
-    lbl_filtro = ttk.Label(col_filtro)
-    lbl_filtro.pack(anchor="w")
-    entry_filtro = ttk.Entry(col_filtro)
-    entry_filtro.pack(fill="x")
+    col_conexao = ttk.Frame(row_rehost_conexao)
+    col_conexao.pack(side="left", fill="x", expand=True, padx=(10, 0))
+    lbl_conexao = ttk.Label(col_conexao)
+    lbl_conexao.pack(anchor="w")
+    entry_conexao = ttk.Entry(col_conexao)
+    entry_conexao.pack(fill="x")
 
     # Linha do Meio (Idioma + Resolução)
     row_middle = ttk.Frame(frame)

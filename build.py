@@ -40,6 +40,9 @@ ISCC_CANDIDATES = [
     r"C:\Program Files (x86)\Inno Setup 7\ISCC.exe",
     r"C:\Program Files\Inno Setup 6\ISCC.exe",
     r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    # winget (JRSoftware.InnoSetup) instala por usuário aqui, fora do PATH:
+    os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Inno Setup 6", "ISCC.exe"),
+    os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Inno Setup 7", "ISCC.exe"),
 ]
 
 

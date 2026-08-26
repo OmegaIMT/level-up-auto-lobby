@@ -146,6 +146,35 @@ def read_status() -> dict | None:
     return None
 
 
+_conexao_visible = False
+
+
+def _update_conexao(deadline: float) -> None:
+    """Mostra/esconde a linha 'conectando até HH:MM:SS' + contagem regressiva.
+    Só ocupa espaço no painel enquanto lobby.py está no buffer extra de
+    conexão (ver conexao_deadline em lobby.py/_accept_loop) - resto do tempo
+    a linha some e o painel volta ao tamanho normal."""
+    global _conexao_visible
+    now = time.time()
+
+    if deadline and deadline > now:
+        alvo = time.strftime("%H:%M:%S", time.localtime(deadline))
+        restante = deadline - now
+        mm, ss = divmod(int(restante + 0.999), 60)
+        label_conexao_alvo.config(text=f"{TEXT.get('connecting_label', 'conectando até')}: {alvo}")
+        label_conexao_count.config(text=f"-{mm:02d}:{ss:02d}")
+        if not _conexao_visible:
+            label_conexao_alvo.pack(fill="x", padx=10, pady=(0, 0), before=label_exit)
+            label_conexao_count.pack(padx=10, pady=(0, 5), before=label_exit)
+            root.geometry(f"{LARGURA}x{ALTURA_EXPANDIDA}+{root.winfo_x()}+{root.winfo_y()}")
+            _conexao_visible = True
+    elif _conexao_visible:
+        label_conexao_alvo.pack_forget()
+        label_conexao_count.pack_forget()
+        root.geometry(f"{LARGURA}x{ALTURA_BASE}+{root.winfo_x()}+{root.winfo_y()}")
+        _conexao_visible = False
+
+
 def render(status: dict) -> None:
     partidas   = status.get("partidas", 0)
     rehost_max = status.get("rehost_max", 0)
@@ -154,6 +183,7 @@ def render(status: dict) -> None:
     label_rehost.config(text=f"{TEXT.get('rehost_label', 're-host')} = {partidas}/{rehost_max}")
     label_ciclos.config(text=f"{TEXT.get('ciclos_label', 'ciclos')}  = {ciclos}")
     label_exit.config(text=f"{TEXT.get('exit_label', 'exit')}  = {TEXT.get('esc_key', 'esc')}")
+    _update_conexao(status.get("conexao_deadline", 0.0))
 
 
 def poll() -> None:
@@ -165,6 +195,11 @@ def poll() -> None:
         label_rehost.config(text=f"{TEXT.get('rehost_label', 're-host')} = {no_data}/{no_data}")
         label_ciclos.config(text=f"{TEXT.get('ciclos_label', 'ciclos')}  = {no_data}")
         label_exit.config(text=f"{TEXT.get('exit_label', 'exit')}  = {TEXT.get('esc_key', 'esc')}")
+        _update_conexao(0.0)
+    else:
+        # sem mudança no status.json (mtime igual) - mesmo assim a contagem
+        # regressiva precisa seguir descendo a cada tick do poll.
+        _update_conexao(_last_status.get("conexao_deadline", 0.0))
 
     root.after(POLL_INTERVAL, poll)
 
@@ -198,9 +233,10 @@ if __name__ == "__main__":
     root.wm_attributes("-alpha", 0.80)
     root.configure(bg="black")
 
-    largura, altura = 260, 80
-    pos_x = root.winfo_screenwidth() - largura - 20
-    root.geometry(f"{largura}x{altura}+{pos_x}+20")
+    LARGURA, ALTURA_BASE = 260, 80
+    ALTURA_EXPANDIDA = ALTURA_BASE + 40  # + linhas "conectando até" e contagem (ver _update_conexao)
+    pos_x = root.winfo_screenwidth() - LARGURA - 20
+    root.geometry(f"{LARGURA}x{ALTURA_BASE}+{pos_x}+20")
 
     FONT  = ("Consolas", 11, "bold")
     COLOR = "#00FF00"
@@ -212,6 +248,14 @@ if __name__ == "__main__":
     label_ciclos = tk.Label(root, text="ciclos  = 0", fg=COLOR, bg="black",
                             font=FONT, anchor="w")
     label_ciclos.pack(fill="x", padx=10, pady=(0, 0))
+
+    # "conectando até HH:MM:SS" + contagem regressiva - criados aqui mas só
+    # entram na tela (pack) enquanto lobby.py estiver no buffer de conexão,
+    # ver _update_conexao().
+    label_conexao_alvo = tk.Label(root, text="", fg=COLOR, bg="black",
+                                  font=FONT, anchor="w")
+    label_conexao_count = tk.Label(root, text="", fg=COLOR, bg="black",
+                                   font=FONT, anchor="w")
 
     label_exit = tk.Label(root, text="exit  = esc", fg=COLOR, bg="black",
                           font=FONT, anchor="w")

@@ -121,6 +121,7 @@ _STATUS_DEFAULTS = {
     "password_deadline": 0.0,
     "current_image": "",
     "image_found": False,
+    "conexao_deadline": 0.0,
 }
 
 
@@ -132,6 +133,7 @@ def save_status(
     password_deadline: float | None = None,
     current_image: str | None = None,
     image_found: bool | None = None,
+    conexao_deadline: float | None = None,
 ) -> None:
     """Atualiza o status.json lido pelo painel.py fazendo MERGE."""
     with _status_lock:
@@ -152,6 +154,8 @@ def save_status(
             payload["current_image"] = current_image
         if image_found is not None:
             payload["image_found"] = image_found
+        if conexao_deadline is not None:
+            payload["conexao_deadline"] = conexao_deadline
 
         try:
             with open(STATUS_FILE, "w", encoding="utf-8") as f:
@@ -187,6 +191,10 @@ else:
     PASSWORD_FIXED = str(raw_pw)
 
 FILTRO = str(SESSION.get("filtro", "")).strip()  # texto digitado no campo de busca; vazio = pula filtro
+try:
+    CONEXAO_SEG = max(0.0, float(SESSION.get("conexao_min", 0)) * 60)
+except (TypeError, ValueError):
+    CONEXAO_SEG = 0.0  # tempo extra (campo "Conexão" do start.py, em minutos) somado após achar fim.png, antes de abrir o in_game - dá tempo do Dota terminar de conectar no servidor
 REHOST_MAX: int = SESSION.get("rehost_max", 1)
 LANGUAGE = SESSION.get("language", "pt-br")
 RESOLUTION = SESSION.get("resolution", "1920x1080")
@@ -823,6 +831,11 @@ def _accept_loop() -> bool:
 
         if locate("fim.png"):
             _log("_accept_loop: fim.png achado - entrando no jogo")
+            if CONEXAO_SEG > 0:
+                _log(f"_accept_loop: aguardando {CONEXAO_SEG:.0f}s extras (tempo de conexão) antes do in_game")
+                save_status(conexao_deadline=time.time() + CONEXAO_SEG)
+                time.sleep(CONEXAO_SEG)
+                save_status(conexao_deadline=0.0)
             _launch_in_game()
             return True
 

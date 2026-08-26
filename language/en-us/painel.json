@@ -1,5 +1,6 @@
 {
     "rehost_label": "re-host",
+    "connecting_label": "connecting until",
     "ciclos_label": "cycles",
     "exit_label": "exit",
     "esc_key": "esc"
