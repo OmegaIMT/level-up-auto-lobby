@@ -593,25 +593,6 @@ def _locate_raw(
         return None
 
 
-# fonte.png mora em language/global/{RES}/ direto na raiz (sem subpasta
-# "lobby" - é o mesmo arquivo que in_game.py/fim_game.py usam pra saber que
-# a partida começou). _img_path/_locate_raw resolvem só dentro de
-# IMG_DIR/GLOBAL_DIR (com sufixo "lobby"), que não é onde esse arquivo fica -
-# por isso um caminho e uma busca à parte aqui.
-FONTE_GLOBAL_PATH = os.path.join("language", "global", RESOLUTION, "fonte.png")
-
-
-def _locate_fonte(confidence: float = 0.75) -> tuple[int, int] | None:
-    if not os.path.exists(FONTE_GLOBAL_PATH):
-        return None
-    try:
-        return pyautogui.locateCenterOnScreen(FONTE_GLOBAL_PATH, confidence=confidence)
-    except Exception as e:
-        if type(e).__name__ != "ImageNotFoundException":
-            _log(f"_locate_fonte: EXCEÇÃO ao buscar imagem - {type(e).__name__}: {e}")
-        return None
-
-
 def locate(name: str, confidence: float = 0.7) -> tuple[int, int] | None:
     """Usa a coordenada cacheada (se existir) pra restringir a busca a uma
     região pequena em volta da última posição achada - bem mais rápido que
@@ -971,9 +952,9 @@ def _restart_with_current_password() -> None:
 # ==================================================
 def _accept_loop() -> bool:
     # CONEXAO_SEG (campo "Conexão" do start.py) SOMA no timeout de espera do
-    # fim.png/fonte.png, não é buffer depois - dá mais tempo pro Dota
-    # terminar de conectar antes de desistir e resetar. Achou fim/fonte ->
-    # lança o in_game NA HORA, sem espera extra.
+    # fim.png, não é buffer depois - dá mais tempo pro Dota terminar de
+    # conectar antes de desistir e resetar. Achou fim.png -> lança o in_game
+    # NA HORA, sem espera extra.
     timeout_total = FIM_TIMEOUT + CONEXAO_SEG
     start = time.time()
     while True:
@@ -985,12 +966,12 @@ def _accept_loop() -> bool:
             _stats_add(erros_conexao=1)
             return False
 
-        # fim.png OU fonte.png - qualquer um dos dois já confirma que
-        # conectou (fonte.png é a fonte-base do herói, primeira coisa visível
-        # quando a partida realmente carrega - serve de segunda checagem pra
-        # não ficar preso só esperando fim.png).
-        if locate("fim.png") or _locate_fonte():
-            _log("_accept_loop: fim.png/fonte.png achado - conectado, entrando no jogo direto")
+        # SÓ fim.png - fonte.png foi removido daqui: dava falso positivo logo
+        # após clicar aceitar (batia em algo da tela de loading por engano),
+        # fazendo o lobby encerrar e ir pra "em_partida" cedo demais, antes
+        # de conectar de verdade.
+        if locate("fim.png"):
+            _log("_accept_loop: fim.png achado - conectado, entrando no jogo direto")
             save_status(conexao_deadline=0.0)
             _set_status("em_partida")
             _stats_add(salas_conectadas=1)
@@ -1125,7 +1106,7 @@ def step_lobby() -> None:
                 _log("step_lobby: aceitar.png achado - clicando")
                 # "conectando" começa aqui (achou aceitar) - deadline é o
                 # mesmo teto de espera do _accept_loop (FIM_TIMEOUT +
-                # CONEXAO_SEG, ver lá). Sem aperto depois: achou fim/fonte,
+                # CONEXAO_SEG, ver lá). Sem aperto depois: achou fim.png,
                 # lança o in_game na hora.
                 _set_status("conectando")
                 save_status(conexao_deadline=time.time() + FIM_TIMEOUT + CONEXAO_SEG)
