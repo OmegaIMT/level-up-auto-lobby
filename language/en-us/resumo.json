@@ -1,0 +1,14 @@
+{
+    "titulo": "Session summary",
+    "partidas_label": "matches played",
+    "ciclos_label": "cycles completed",
+    "salas_achadas_label": "rooms found",
+    "salas_conectadas_label": "rooms connected",
+    "erros_conexao_label": "connection errors",
+    "encerrados_por_erro_label": "cycles ended by error",
+    "tempo_buscando_sala_label": "time finding room",
+    "tempo_em_partida_label": "total time in match",
+    "tempo_medio_partida_label": "average time per match",
+    "tempo_ligado_label": "total time running",
+    "fechar_label": "ESC = close"
+}

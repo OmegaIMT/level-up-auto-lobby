@@ -10,6 +10,9 @@ auto_lobby.exe
 teste.py
 config.json
 status.json
+stats.json
+esc_summary.lock
+bot.lock
 bot_log.txt
 lobby_log.txt
 in_game_log.txt

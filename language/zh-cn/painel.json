@@ -3,5 +3,11 @@
     "connecting_label": "连接至",
     "ciclos_label": "循环",
     "exit_label": "退出",
-    "esc_key": "Esc"
+    "esc_key": "Esc",
+    "status_label": "状态",
+    "tempo_label": "时间",
+    "status_buscando_sala": "寻找房间",
+    "status_aguardando": "等待中",
+    "status_conectando": "连接中",
+    "status_em_partida": "游戏中"
 }

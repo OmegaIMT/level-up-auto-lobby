@@ -1,0 +1,14 @@
+{
+    "titulo": "Итоги сессии",
+    "partidas_label": "сыграно матчей",
+    "ciclos_label": "завершено циклов",
+    "salas_achadas_label": "найдено комнат",
+    "salas_conectadas_label": "подключений к комнате",
+    "erros_conexao_label": "ошибок подключения",
+    "encerrados_por_erro_label": "циклов завершено с ошибкой",
+    "tempo_buscando_sala_label": "время поиска комнаты",
+    "tempo_em_partida_label": "общее время в игре",
+    "tempo_medio_partida_label": "среднее время матча",
+    "tempo_ligado_label": "общее время работы",
+    "fechar_label": "ESC = закрыть"
+}

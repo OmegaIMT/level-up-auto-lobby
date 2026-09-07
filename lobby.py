@@ -122,6 +122,14 @@ _STATUS_DEFAULTS = {
     "current_image": "",
     "image_found": False,
     "conexao_deadline": 0.0,
+    # status: "buscando_sala" | "aguardando" | "conectando" | "em_partida" -
+    # painel.py usa pra decidir o rótulo e se o campo "tempo" conta pra cima
+    # (buscando_sala/aguardando/em_partida) ou pra baixo (conectando, mesmo
+    # esquema de conexao_deadline). status_since é o timestamp de quando
+    # ENTROU no status atual (ver _set_status) - só ele muda na transição,
+    # não a cada tick, senão o crescente nunca sairia de 00:00.
+    "status": "buscando_sala",
+    "status_since": 0.0,
 }
 
 
@@ -134,6 +142,8 @@ def save_status(
     current_image: str | None = None,
     image_found: bool | None = None,
     conexao_deadline: float | None = None,
+    status: str | None = None,
+    status_since: float | None = None,
 ) -> None:
     """Atualiza o status.json lido pelo painel.py fazendo MERGE."""
     with _status_lock:
@@ -156,12 +166,79 @@ def save_status(
             payload["image_found"] = image_found
         if conexao_deadline is not None:
             payload["conexao_deadline"] = conexao_deadline
+        if status is not None:
+            payload["status"] = status
+        if status_since is not None:
+            payload["status_since"] = status_since
 
         try:
             with open(STATUS_FILE, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"Erro ao salvar {STATUS_FILE}: {e}")
+
+
+# ==================================================
+# STATS DA SESSÃO (resumo do ESC - ver resumo.py)
+# ==================================================
+STATS_FILE = "stats.json"
+_stats_lock = threading.Lock()
+
+
+def _stats_add(**deltas: float) -> None:
+    """Soma cada valor em deltas ao respectivo campo em stats.json (merge -
+    lê, soma, grava). Contador de sessão inteira, zerado só quando o usuário
+    clica Iniciar (ver start.py/reset_stats)."""
+    with _stats_lock:
+        current: dict = {}
+        if os.path.exists(STATS_FILE):
+            try:
+                with open(STATS_FILE, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        current = loaded
+            except Exception:
+                pass
+        for key, valor in deltas.items():
+            current[key] = current.get(key, 0) + valor
+        try:
+            with open(STATS_FILE, "w", encoding="utf-8") as f:
+                json.dump(current, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+
+# ==================================================
+# STATUS (buscando_sala / aguardando / conectando / em_partida)
+# ==================================================
+_status_atual: str | None = None
+_status_since_local = 0.0
+
+
+def _set_status(nome: str) -> None:
+    """Só grava (e reseta status_since) quando o status muda de verdade -
+    chamado toda iteração de alguns loops, então sem essa guarda o
+    status_since seria resetado a cada tick e o "tempo" crescente do painel
+    nunca sairia de 00:00. "em_partida" fica intacto por todo o ciclo
+    (várias partidas via re-host) porque só o lobby.py chama _set_status -
+    in_game.py/fim_game.py nunca tocam em "status"/"status_since" (só
+    partidas/rehost_max/ciclos), e um lobby.py novo só sobe de novo quando o
+    ciclo fecha ou dá erro (ver disconnect_and_relaunch nos outros dois
+    arquivos) - é aí que volta pra "buscando_sala".
+
+    Ao SAIR de "buscando_sala" soma o tempo gasto nela em
+    stats.tempo_buscando_sala_total - é o único status que o lobby.py entra
+    e sai várias vezes no mesmo processo (toda vez que uma sala falha volta
+    pra cá), por isso acumula aqui em vez de num call site só."""
+    global _status_atual, _status_since_local
+    if _status_atual == nome:
+        return
+    agora = time.time()
+    if _status_atual == "buscando_sala" and _status_since_local:
+        _stats_add(tempo_buscando_sala_total=agora - _status_since_local)
+    _status_atual = nome
+    _status_since_local = agora
+    save_status(status=nome, status_since=agora)
 
 
 # Debug ao vivo (painel.py): qual imagem locate() buscou por último e se achou.
@@ -326,6 +403,57 @@ def _matar_irmaos() -> None:
         pass
 
 
+# ==================================================
+# RESUMO DA SESSÃO (mostrado ao apertar ESC - ver resumo.py)
+# ==================================================
+ESC_LOCK_FILE = "esc_summary.lock"
+
+
+def _tentar_gerar_resumo() -> bool:
+    """lobby/in_game/fim_game/painel pegam o ESC quase ao mesmo tempo (cada
+    um com seu próprio _watch_esc) - só UM deve fechar as stats e abrir o
+    resumo. open(..., 'x') é atômico no SO: só o primeiro a chegar consegue
+    criar o arquivo, os outros caem no FileExistsError e só seguem pro
+    _matar_irmaos direto."""
+    try:
+        fd = os.open(ESC_LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+    except Exception:
+        return True  # não devia falhar por outro motivo - na dúvida, gera
+
+
+def _flush_stats_final() -> None:
+    """Fecha o intervalo do status atual (buscando_sala/em_partida) em
+    stats.json antes do resumo - senão o trecho entre a última transição e o
+    ESC nunca entraria na contagem. Lê status.json direto (não o estado local
+    deste processo) porque qualquer um dos 4 (lobby/in_game/fim_game/painel)
+    pode ser o que ganha a corrida do ESC, inclusive durante "em_partida",
+    que quem grava é o lobby.py mas quem tá vivo nesse momento é outro."""
+    dados = _read_status_raw()
+    estado = dados.get("status")
+    desde = dados.get("status_since", 0.0)
+    if not desde:
+        return
+    elapsed = time.time() - desde
+    if estado == "buscando_sala":
+        _stats_add(tempo_buscando_sala_total=elapsed)
+    elif estado == "em_partida":
+        _stats_add(tempo_em_partida_total=elapsed)
+
+
+def _launch_resumo() -> None:
+    try:
+        if os.path.exists("resumo.exe"):
+            subprocess.Popen(["resumo.exe"])
+        elif os.path.exists("resumo.py"):
+            subprocess.Popen([sys.executable, "resumo.py"])
+    except Exception:
+        pass
+
+
 def _watch_esc() -> None:
     """
     GetAsyncKeyState em vez de 'keyboard': hotkey por nome depende do
@@ -338,6 +466,9 @@ def _watch_esc() -> None:
     save_status(current_pw="", password_deadline=0.0)
     _delete_lock()
     print("\a")
+    if _tentar_gerar_resumo():
+        _flush_stats_final()
+        _launch_resumo()
     _matar_irmaos()
     os._exit(1)
 
@@ -459,6 +590,25 @@ def _locate_raw(
                 _ultima_excecao_locate = msg
                 _ultima_excecao_locate_time = now
                 _log(f"_locate_raw: EXCEÇÃO ao buscar imagem - {msg}")
+        return None
+
+
+# fonte.png mora em language/global/{RES}/ direto na raiz (sem subpasta
+# "lobby" - é o mesmo arquivo que in_game.py/fim_game.py usam pra saber que
+# a partida começou). _img_path/_locate_raw resolvem só dentro de
+# IMG_DIR/GLOBAL_DIR (com sufixo "lobby"), que não é onde esse arquivo fica -
+# por isso um caminho e uma busca à parte aqui.
+FONTE_GLOBAL_PATH = os.path.join("language", "global", RESOLUTION, "fonte.png")
+
+
+def _locate_fonte(confidence: float = 0.75) -> tuple[int, int] | None:
+    if not os.path.exists(FONTE_GLOBAL_PATH):
+        return None
+    try:
+        return pyautogui.locateCenterOnScreen(FONTE_GLOBAL_PATH, confidence=confidence)
+    except Exception as e:
+        if type(e).__name__ != "ImageNotFoundException":
+            _log(f"_locate_fonte: EXCEÇÃO ao buscar imagem - {type(e).__name__}: {e}")
         return None
 
 
@@ -820,6 +970,11 @@ def _restart_with_current_password() -> None:
 # PÓS-CLIQUE EM LOBBY
 # ==================================================
 def _accept_loop() -> bool:
+    # CONEXAO_SEG (campo "Conexão" do start.py) SOMA no timeout de espera do
+    # fim.png/fonte.png, não é buffer depois - dá mais tempo pro Dota
+    # terminar de conectar antes de desistir e resetar. Achou fim/fonte ->
+    # lança o in_game NA HORA, sem espera extra.
+    timeout_total = FIM_TIMEOUT + CONEXAO_SEG
     start = time.time()
     while True:
         err = locate("erro.png")
@@ -827,24 +982,29 @@ def _accept_loop() -> bool:
             _log("_accept_loop: erro.png apareceu depois do aceitar - clicando e abortando")
             safe_click(err)
             time.sleep(0.1)
+            _stats_add(erros_conexao=1)
             return False
 
-        if locate("fim.png"):
-            _log("_accept_loop: fim.png achado - entrando no jogo")
-            if CONEXAO_SEG > 0:
-                _log(f"_accept_loop: aguardando {CONEXAO_SEG:.0f}s extras (tempo de conexão) antes do in_game")
-                save_status(conexao_deadline=time.time() + CONEXAO_SEG)
-                time.sleep(CONEXAO_SEG)
-                save_status(conexao_deadline=0.0)
+        # fim.png OU fonte.png - qualquer um dos dois já confirma que
+        # conectou (fonte.png é a fonte-base do herói, primeira coisa visível
+        # quando a partida realmente carrega - serve de segunda checagem pra
+        # não ficar preso só esperando fim.png).
+        if locate("fim.png") or _locate_fonte():
+            _log("_accept_loop: fim.png/fonte.png achado - conectado, entrando no jogo direto")
+            save_status(conexao_deadline=0.0)
+            _set_status("em_partida")
+            _stats_add(salas_conectadas=1)
             _launch_in_game()
             return True
 
         if locate("sala.png"):
             _log("_accept_loop: voltou pra sala.png depois do aceitar (provável sala cheia) - abortando")
+            _stats_add(erros_conexao=1)
             return False
 
-        if time.time() - start > FIM_TIMEOUT:
-            _log(f"_accept_loop: TIMEOUT ({FIM_TIMEOUT}s) sem erro/fim/sala - abortando")
+        if time.time() - start > timeout_total:
+            _log(f"_accept_loop: TIMEOUT ({timeout_total:.0f}s = FIM_TIMEOUT {FIM_TIMEOUT}s + conexao {CONEXAO_SEG:.0f}s) sem erro/fim/sala - abortando")
+            _stats_add(erros_conexao=1)
             return False
 
         time.sleep(POLL_FAST)
@@ -963,6 +1123,12 @@ def step_lobby() -> None:
                 # verdade (era limitado a ACCEPT_RETRIES tentativas e caía pro
                 # _accept_loop mesmo com aceitar.png ainda óbvio na tela).
                 _log("step_lobby: aceitar.png achado - clicando")
+                # "conectando" começa aqui (achou aceitar) - deadline é o
+                # mesmo teto de espera do _accept_loop (FIM_TIMEOUT +
+                # CONEXAO_SEG, ver lá). Sem aperto depois: achou fim/fonte,
+                # lança o in_game na hora.
+                _set_status("conectando")
+                save_status(conexao_deadline=time.time() + FIM_TIMEOUT + CONEXAO_SEG)
                 tentativa = 0
                 while aceitar:
                     tentativa += 1
@@ -992,6 +1158,8 @@ def step_lobby() -> None:
             continue
 
         # ── ESTADO: buscando lobby na lista ─────────────────────────────────
+        _set_status("buscando_sala")
+
         err = locate("erro.png")
         if err:
             _log("step_lobby: erro.png na lista (fora da sala) - fechando e clicando ATT de novo")
@@ -1003,6 +1171,8 @@ def step_lobby() -> None:
         if locate("sala.png"):
             inside_room = True
             room_enter_time = time.time()
+            _set_status("aguardando")
+            _stats_add(salas_achadas=1)
             continue
 
         game = _refresh_until_game_appears()
@@ -1038,6 +1208,8 @@ def step_lobby() -> None:
 
         inside_room = True
         room_enter_time = time.time()
+        _set_status("aguardando")
+        _stats_add(salas_achadas=1)
 
 
 # ==================================================
@@ -1046,6 +1218,12 @@ def step_lobby() -> None:
 def main() -> None:
     threading.Thread(target=_watch_esc, daemon=True).start()
     _cache_load()
+
+    # lobby.py só (re)inicia quando um ciclo fecha ou dá erro (ver
+    # disconnect_and_relaunch em in_game.py/fim_game.py) - é exatamente onde
+    # "em_partida" deve voltar a zero, então já entra aqui como
+    # "buscando_sala" antes de qualquer outra coisa.
+    _set_status("buscando_sala")
 
     open_dota()
     step_menu()

@@ -1,0 +1,14 @@
+{
+    "titulo": "Resumo da sessão",
+    "partidas_label": "partidas jogadas",
+    "ciclos_label": "ciclos completos",
+    "salas_achadas_label": "salas achadas",
+    "salas_conectadas_label": "salas conectadas",
+    "erros_conexao_label": "erros de conexão",
+    "encerrados_por_erro_label": "ciclos encerrados por erro",
+    "tempo_buscando_sala_label": "tempo buscando sala",
+    "tempo_em_partida_label": "tempo total em partida",
+    "tempo_medio_partida_label": "tempo médio por partida",
+    "tempo_ligado_label": "tempo total ligado",
+    "fechar_label": "ESC = fechar"
+}

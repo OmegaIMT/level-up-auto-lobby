@@ -3,5 +3,11 @@
     "connecting_label": "подключение до",
     "ciclos_label": "циклы",
     "exit_label": "выход",
-    "esc_key": "Esc"
+    "esc_key": "Esc",
+    "status_label": "статус",
+    "tempo_label": "время",
+    "status_buscando_sala": "поиск комнаты",
+    "status_aguardando": "ожидание",
+    "status_conectando": "подключение",
+    "status_em_partida": "в игре"
 }

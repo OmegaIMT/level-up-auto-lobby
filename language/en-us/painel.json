@@ -3,5 +3,11 @@
     "connecting_label": "connecting until",
     "ciclos_label": "cycles",
     "exit_label": "exit",
-    "esc_key": "esc"
+    "esc_key": "esc",
+    "status_label": "status",
+    "tempo_label": "time",
+    "status_buscando_sala": "finding room",
+    "status_aguardando": "waiting",
+    "status_conectando": "connecting",
+    "status_em_partida": "in match"
 }

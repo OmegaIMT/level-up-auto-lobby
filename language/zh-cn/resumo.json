@@ -1,0 +1,14 @@
+{
+    "titulo": "会话摘要",
+    "partidas_label": "已完成对局",
+    "ciclos_label": "完成循环数",
+    "salas_achadas_label": "找到房间数",
+    "salas_conectadas_label": "成功连接房间数",
+    "erros_conexao_label": "连接错误数",
+    "encerrados_por_erro_label": "因错误结束的循环",
+    "tempo_buscando_sala_label": "寻找房间总时长",
+    "tempo_em_partida_label": "对局总时长",
+    "tempo_medio_partida_label": "平均每局时长",
+    "tempo_ligado_label": "运行总时长",
+    "fechar_label": "ESC = 关闭"
+}

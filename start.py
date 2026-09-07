@@ -5,6 +5,7 @@ import subprocess
 import json
 import queue
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
@@ -26,6 +27,8 @@ HIDDEN_WINDOW.wShowWindow = 0
 
 STATUS_FILE = "status.json"
 CONFIG_FILE = "config.json"
+STATS_FILE = "stats.json"           # contador de sessão (ver resumo.py) - some do ESC ao clicar em Iniciar
+ESC_LOCK_FILE = "esc_summary.lock"  # trava pra só um dos processos (lobby/in_game/fim_game/painel) gerar o resumo quando o ESC é apertado
 
 processo_lobby = None
 processo_painel = None
@@ -279,6 +282,32 @@ def save_config(config: dict) -> None:
     except Exception as e:
         print(f"Erro ao salvar config: {e}")
 
+def reset_stats() -> None:
+    """Zera stats.json (contadores de sessão pro resumo do ESC - ver
+    resumo.py) e a trava do resumo anterior - chamado só aqui, ao clicar em
+    Iniciar, pra "tempo total ligado" contar a partir de agora e os
+    contadores não arrastarem de uma sessão pra outra."""
+    payload = {
+        "bot_started_at": time.time(),
+        "partidas_total": 0,
+        "salas_achadas": 0,
+        "salas_conectadas": 0,
+        "erros_conexao": 0,
+        "partidas_encerradas_antes_ciclo": 0,
+        "tempo_buscando_sala_total": 0.0,
+        "tempo_em_partida_total": 0.0,
+    }
+    try:
+        with open(STATS_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Erro ao salvar {STATS_FILE}: {e}")
+    try:
+        if os.path.exists(ESC_LOCK_FILE):
+            os.remove(ESC_LOCK_FILE)
+    except Exception:
+        pass
+
 def kill_all_children() -> None:
     global processo_lobby, processo_painel
     for proc in (processo_lobby, processo_painel):
@@ -370,6 +399,7 @@ def start() -> None:
 
     save_config(config)
     save_status(0, int(rehost) if rehost.isdigit() else 1, 0, current_pw=pw1)
+    reset_stats()
 
     if os.path.exists("lobby.exe"):
         processo_lobby = subprocess.Popen(["lobby.exe", CONFIG_FILE], startupinfo=HIDDEN_WINDOW)

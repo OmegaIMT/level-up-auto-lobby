@@ -55,6 +55,7 @@ a_in_game  = _analysis('in_game.py', hiddenimports=_CV2)
 a_fim_game = _analysis('fim_game.py', hiddenimports=_CV2)
 a_lobby    = _analysis('lobby.py', hiddenimports=_CV2)
 a_painel   = _analysis('painel.py')
+a_resumo   = _analysis('resumo.py')
 
 a_in_game.binaries  = _strip_ffmpeg_dll(a_in_game.binaries)
 a_fim_game.binaries = _strip_ffmpeg_dll(a_fim_game.binaries)
@@ -65,12 +66,14 @@ pyz_in_game  = PYZ(a_in_game.pure)
 pyz_fim_game = PYZ(a_fim_game.pure)
 pyz_lobby    = PYZ(a_lobby.pure)
 pyz_painel   = PYZ(a_painel.pure)
+pyz_resumo   = PYZ(a_resumo.pure)
 
 exe_start    = _exe(pyz_start,    a_start,    'start')
 exe_in_game  = _exe(pyz_in_game,  a_in_game,  'in_game')
 exe_fim_game = _exe(pyz_fim_game, a_fim_game, 'fim_game')
 exe_lobby    = _exe(pyz_lobby,    a_lobby,    'lobby')
 exe_painel   = _exe(pyz_painel,   a_painel,   'painel')
+exe_resumo   = _exe(pyz_resumo,   a_resumo,   'resumo')
 
 coll = COLLECT(
     exe_start,    a_start.binaries,    a_start.datas,
@@ -78,6 +81,7 @@ coll = COLLECT(
     exe_fim_game, a_fim_game.binaries, a_fim_game.datas,
     exe_lobby,    a_lobby.binaries,    a_lobby.datas,
     exe_painel,   a_painel.binaries,   a_painel.datas,
+    exe_resumo,   a_resumo.binaries,   a_resumo.datas,
     strip=False,
     upx=False,
     upx_exclude=[],

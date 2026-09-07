@@ -33,6 +33,13 @@ TEXT_DEFAULTS = {
     "ciclos_label": "ciclos",
     "exit_label": "exit",
     "esc_key": "esc",
+    "status_label": "status",
+    "tempo_label": "tempo",
+    "connecting_label": "conectando até",
+    "status_buscando_sala": "buscando sala",
+    "status_aguardando": "aguardando",
+    "status_conectando": "conectando",
+    "status_em_partida": "em partida",
 }
 
 TEXT: dict = {}
@@ -69,7 +76,13 @@ def ensure_status_file() -> None:
     """Gera status.json com valores default se o arquivo ainda não existir."""
     if os.path.exists(STATUS_FILE):
         return
-    default = {"partidas": 0, "rehost_max": 0, "ciclos": 0}
+    default = {
+        "partidas": 0,
+        "rehost_max": 0,
+        "ciclos": 0,
+        "status": "buscando_sala",
+        "status_since": 0.0,
+    }
     try:
         with open(STATUS_FILE, "w", encoding="utf-8") as f:
             json.dump(default, f, ensure_ascii=False, indent=2)
@@ -111,6 +124,81 @@ def _matar_irmaos() -> None:
         pass
 
 
+# ==================================================
+# RESUMO DA SESSÃO (mostrado ao apertar ESC - ver resumo.py)
+# ==================================================
+STATS_FILE = "stats.json"
+ESC_LOCK_FILE = "esc_summary.lock"
+
+
+def _stats_add(**deltas: float) -> None:
+    """Mesmo esquema do lobby.py/_stats_add - merge (lê, soma, grava)."""
+    current: dict = {}
+    if os.path.exists(STATS_FILE):
+        try:
+            with open(STATS_FILE, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    current = loaded
+        except Exception:
+            pass
+    for key, valor in deltas.items():
+        current[key] = current.get(key, 0) + valor
+    try:
+        with open(STATS_FILE, "w", encoding="utf-8") as f:
+            json.dump(current, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _tentar_gerar_resumo() -> bool:
+    """Mesmo esquema do lobby.py - só um dos 4 processos (lobby/in_game/
+    fim_game/painel) que pegam o ESC ao mesmo tempo deve fechar as stats e
+    abrir o resumo. open(..., 'x') é atômico no SO."""
+    try:
+        fd = os.open(ESC_LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+    except Exception:
+        return True
+
+
+def _flush_stats_final() -> None:
+    """Fecha o intervalo do status atual (buscando_sala/em_partida) em
+    stats.json antes do resumo - painel.py só lê status.json, nunca escreve
+    "status"/"status_since", mas pode ser quem ganha a corrida do ESC."""
+    estado = ""
+    desde = 0.0
+    if os.path.exists(STATUS_FILE):
+        try:
+            with open(STATUS_FILE, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    estado = loaded.get("status", "")
+                    desde = loaded.get("status_since", 0.0)
+        except Exception:
+            pass
+    if not desde:
+        return
+    elapsed = time.time() - desde
+    if estado == "buscando_sala":
+        _stats_add(tempo_buscando_sala_total=elapsed)
+    elif estado == "em_partida":
+        _stats_add(tempo_em_partida_total=elapsed)
+
+
+def _launch_resumo() -> None:
+    try:
+        if os.path.exists("resumo.exe"):
+            subprocess.Popen(["resumo.exe"])
+        elif os.path.exists("resumo.py"):
+            subprocess.Popen([sys.executable, "resumo.py"])
+    except Exception:
+        pass
+
+
 def _watch_esc() -> None:
     """
     Poll de VK_ESCAPE via GetAsyncKeyState em vez de biblioteca 'keyboard':
@@ -122,6 +210,9 @@ def _watch_esc() -> None:
         return
     while True:
         if _user32.GetAsyncKeyState(VK_ESCAPE) & 0x8000:
+            if _tentar_gerar_resumo():
+                _flush_stats_final()
+                _launch_resumo()
             _matar_irmaos()
             os._exit(0)
         time.sleep(0.05)
@@ -146,44 +237,64 @@ def read_status() -> dict | None:
     return None
 
 
-_conexao_visible = False
+# status ("buscando_sala"/"aguardando"/"em_partida") sempre tem um valor -
+# status/tempo ficam sempre visíveis. Só o "conectando até HH:MM:SS" (mesmo
+# estilo de antes, exclusivo do estado "conectando") entra/sai do painel.
+_conexao_alvo_visible = False
 
 
-def _update_conexao(deadline: float) -> None:
-    """Mostra/esconde a linha 'conectando até HH:MM:SS' + contagem regressiva.
-    Só ocupa espaço no painel enquanto lobby.py está no buffer extra de
-    conexão (ver conexao_deadline em lobby.py/_accept_loop) - resto do tempo
-    a linha some e o painel volta ao tamanho normal."""
-    global _conexao_visible
+def _update_conexao_alvo(deadline: float) -> None:
+    global _conexao_alvo_visible
     now = time.time()
 
     if deadline and deadline > now:
         alvo = time.strftime("%H:%M:%S", time.localtime(deadline))
-        restante = deadline - now
-        mm, ss = divmod(int(restante + 0.999), 60)
         label_conexao_alvo.config(text=f"{TEXT.get('connecting_label', 'conectando até')}: {alvo}")
-        label_conexao_count.config(text=f"-{mm:02d}:{ss:02d}")
-        if not _conexao_visible:
+        if not _conexao_alvo_visible:
             label_conexao_alvo.pack(fill="x", padx=10, pady=(0, 0), before=label_exit)
-            label_conexao_count.pack(padx=10, pady=(0, 5), before=label_exit)
             root.geometry(f"{LARGURA}x{ALTURA_EXPANDIDA}+{root.winfo_x()}+{root.winfo_y()}")
-            _conexao_visible = True
-    elif _conexao_visible:
+            _conexao_alvo_visible = True
+    elif _conexao_alvo_visible:
         label_conexao_alvo.pack_forget()
-        label_conexao_count.pack_forget()
         root.geometry(f"{LARGURA}x{ALTURA_BASE}+{root.winfo_x()}+{root.winfo_y()}")
-        _conexao_visible = False
+        _conexao_alvo_visible = False
+
+
+def _format_tempo(segundos: float, crescente: bool) -> str:
+    segundos = max(segundos, 0.0)
+    total = int(segundos) if crescente else int(segundos + 0.999)
+    mm, ss = divmod(total, 60)
+    return f"{'+' if crescente else '-'}{mm:02d}:{ss:02d}"
 
 
 def render(status: dict) -> None:
     partidas   = status.get("partidas", 0)
     rehost_max = status.get("rehost_max", 0)
     ciclos     = status.get("ciclos", 0)
+    estado     = status.get("status", "buscando_sala")
+    status_since     = status.get("status_since", 0.0)
+    conexao_deadline = status.get("conexao_deadline", 0.0)
 
     label_rehost.config(text=f"{TEXT.get('rehost_label', 're-host')} = {partidas}/{rehost_max}")
     label_ciclos.config(text=f"{TEXT.get('ciclos_label', 'ciclos')}  = {ciclos}")
     label_exit.config(text=f"{TEXT.get('exit_label', 'exit')}  = {TEXT.get('esc_key', 'esc')}")
-    _update_conexao(status.get("conexao_deadline", 0.0))
+
+    estado_texto = TEXT.get(f"status_{estado}", estado)
+    label_status.config(text=f"{TEXT.get('status_label', 'status')} = {estado_texto}")
+
+    now = time.time()
+    if estado == "conectando":
+        # decrescente até conexao_deadline - mesmo estilo/campo de sempre.
+        restante = conexao_deadline - now
+        label_tempo.config(text=f"{TEXT.get('tempo_label', 'tempo')}  = {_format_tempo(restante, crescente=False)}")
+        _update_conexao_alvo(conexao_deadline)
+    else:
+        # crescente desde que entrou nesse status (buscando_sala/aguardando/
+        # em_partida) - em_partida só zera quando o lobby.py reinicia
+        # (fechou o ciclo ou deu erro), não a cada re-host dentro do ciclo.
+        decorrido = (now - status_since) if status_since else 0.0
+        label_tempo.config(text=f"{TEXT.get('tempo_label', 'tempo')}  = {_format_tempo(decorrido, crescente=True)}")
+        _update_conexao_alvo(0.0)
 
 
 def poll() -> None:
@@ -194,12 +305,14 @@ def poll() -> None:
         no_data = TEXT.get("no_data", "--")
         label_rehost.config(text=f"{TEXT.get('rehost_label', 're-host')} = {no_data}/{no_data}")
         label_ciclos.config(text=f"{TEXT.get('ciclos_label', 'ciclos')}  = {no_data}")
+        label_status.config(text=f"{TEXT.get('status_label', 'status')} = {no_data}")
+        label_tempo.config(text=f"{TEXT.get('tempo_label', 'tempo')}  = {no_data}")
         label_exit.config(text=f"{TEXT.get('exit_label', 'exit')}  = {TEXT.get('esc_key', 'esc')}")
-        _update_conexao(0.0)
+        _update_conexao_alvo(0.0)
     else:
-        # sem mudança no status.json (mtime igual) - mesmo assim a contagem
-        # regressiva precisa seguir descendo a cada tick do poll.
-        _update_conexao(_last_status.get("conexao_deadline", 0.0))
+        # sem mudança no status.json (mtime igual) - mesmo assim o "tempo"
+        # (crescente ou decrescente) precisa seguir andando a cada tick.
+        render(_last_status)
 
     root.after(POLL_INTERVAL, poll)
 
@@ -233,8 +346,8 @@ if __name__ == "__main__":
     root.wm_attributes("-alpha", 0.80)
     root.configure(bg="black")
 
-    LARGURA, ALTURA_BASE = 260, 80
-    ALTURA_EXPANDIDA = ALTURA_BASE + 40  # + linhas "conectando até" e contagem (ver _update_conexao)
+    LARGURA, ALTURA_BASE = 260, 120  # + 40 das linhas "status"/"tempo" (sempre visíveis agora)
+    ALTURA_EXPANDIDA = ALTURA_BASE + 20  # + linha "conectando até" (só durante o status "conectando")
     pos_x = root.winfo_screenwidth() - LARGURA - 20
     root.geometry(f"{LARGURA}x{ALTURA_BASE}+{pos_x}+20")
 
@@ -249,13 +362,22 @@ if __name__ == "__main__":
                             font=FONT, anchor="w")
     label_ciclos.pack(fill="x", padx=10, pady=(0, 0))
 
-    # "conectando até HH:MM:SS" + contagem regressiva - criados aqui mas só
-    # entram na tela (pack) enquanto lobby.py estiver no buffer de conexão,
-    # ver _update_conexao().
+    # status (buscando sala/aguardando/conectando/em partida) + tempo
+    # (crescente ou decrescente conforme o status - ver render()) - ao
+    # contrário do antigo "conectando", ficam sempre visíveis, pois sempre
+    # existe algum status ativo.
+    label_status = tk.Label(root, text="status = buscando sala", fg=COLOR, bg="black",
+                            font=FONT, anchor="w")
+    label_status.pack(fill="x", padx=10, pady=(0, 0))
+
+    label_tempo = tk.Label(root, text="tempo  = +00:00", fg=COLOR, bg="black",
+                           font=FONT, anchor="w")
+    label_tempo.pack(fill="x", padx=10, pady=(0, 0))
+
+    # "conectando até HH:MM:SS" - criado aqui mas só entra na tela (pack)
+    # durante o status "conectando", ver _update_conexao_alvo().
     label_conexao_alvo = tk.Label(root, text="", fg=COLOR, bg="black",
                                   font=FONT, anchor="w")
-    label_conexao_count = tk.Label(root, text="", fg=COLOR, bg="black",
-                                   font=FONT, anchor="w")
 
     label_exit = tk.Label(root, text="exit  = esc", fg=COLOR, bg="black",
                           font=FONT, anchor="w")

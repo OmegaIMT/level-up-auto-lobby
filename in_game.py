@@ -182,14 +182,78 @@ def run_extra(fn, *args, priority: int = PRIORITY_DEFAULT, **kwargs) -> None:
         time.sleep(0.5)
 
 STATUS_FILE = "status.json"
+_status_lock = threading.Lock()
 
 def save_status(partidas: int, rehost_max: int, ciclos: int) -> None:
-    payload = {"partidas": partidas, "rehost_max": rehost_max, "ciclos": ciclos}
-    try:
-        with open(STATUS_FILE, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    """MERGE, não overwrite - ANTES sobrescrevia o status.json inteiro,
+    apagando "status"/"status_since"/"conexao_deadline" (gravados pelo
+    lobby.py) toda vez que in_game.py chamava isso - o painel perdia o
+    estado "em partida" no meio da própria partida. Mesmo esquema do
+    lobby.py/save_status."""
+    with _status_lock:
+        payload: dict = {}
+        if os.path.exists(STATUS_FILE):
+            try:
+                with open(STATUS_FILE, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        payload = loaded
+            except Exception:
+                pass
+        payload["partidas"] = partidas
+        payload["rehost_max"] = rehost_max
+        payload["ciclos"] = ciclos
+        try:
+            with open(STATUS_FILE, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+# ==================================================
+# STATS DA SESSÃO (resumo do ESC - ver resumo.py)
+# ==================================================
+STATS_FILE = "stats.json"
+_stats_lock = threading.Lock()
+
+def _stats_add(**deltas: float) -> None:
+    """Mesmo esquema do lobby.py/_stats_add - merge (lê, soma, grava)."""
+    with _stats_lock:
+        current: dict = {}
+        if os.path.exists(STATS_FILE):
+            try:
+                with open(STATS_FILE, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        current = loaded
+            except Exception:
+                pass
+        for key, valor in deltas.items():
+            current[key] = current.get(key, 0) + valor
+        try:
+            with open(STATS_FILE, "w", encoding="utf-8") as f:
+                json.dump(current, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+def _stats_close_em_partida(erro: bool) -> None:
+    """Fecha a contagem de 'em_partida' (status_since gravado pelo lobby.py
+    quando lançou este in_game - ver lobby.py/_accept_loop) e soma o tempo em
+    stats.tempo_em_partida_total. erro=True (timeout/erro detectado) também
+    conta em partidas_encerradas_antes_ciclo."""
+    status_since = 0.0
+    if os.path.exists(STATUS_FILE):
+        try:
+            with open(STATUS_FILE, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    status_since = loaded.get("status_since", 0.0)
+        except Exception:
+            pass
+    if status_since:
+        deltas = {"tempo_em_partida_total": time.time() - status_since}
+        if erro:
+            deltas["partidas_encerradas_antes_ciclo"] = 1
+        _stats_add(**deltas)
 
 # Debug ao vivo (painel.py): qual imagem locate() buscou por último e se achou.
 # Throttle pra não gerar I/O em disco a cada poll rápido do loop.
@@ -253,6 +317,60 @@ def _matar_irmaos() -> None:
     except Exception:
         pass
 
+# ==================================================
+# RESUMO DA SESSÃO (mostrado ao apertar ESC - ver resumo.py)
+# ==================================================
+ESC_LOCK_FILE = "esc_summary.lock"
+
+
+def _tentar_gerar_resumo() -> bool:
+    """Mesmo esquema do lobby.py - só um dos 4 processos (lobby/in_game/
+    fim_game/painel) que pegam o ESC ao mesmo tempo deve fechar as stats e
+    abrir o resumo. open(..., 'x') é atômico no SO."""
+    try:
+        fd = os.open(ESC_LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+    except Exception:
+        return True
+
+
+def _flush_stats_final() -> None:
+    """Fecha o intervalo do status atual (buscando_sala/em_partida) em
+    stats.json antes do resumo. Lê status.json direto - quem tá "em_partida"
+    quando o ESC é apertado normalmente é este processo (in_game.py)."""
+    estado = ""
+    desde = 0.0
+    if os.path.exists(STATUS_FILE):
+        try:
+            with open(STATUS_FILE, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    estado = loaded.get("status", "")
+                    desde = loaded.get("status_since", 0.0)
+        except Exception:
+            pass
+    if not desde:
+        return
+    elapsed = time.time() - desde
+    if estado == "buscando_sala":
+        _stats_add(tempo_buscando_sala_total=elapsed)
+    elif estado == "em_partida":
+        _stats_add(tempo_em_partida_total=elapsed)
+
+
+def _launch_resumo() -> None:
+    try:
+        if os.path.exists("resumo.exe"):
+            subprocess.Popen(["resumo.exe"])
+        elif os.path.exists("resumo.py"):
+            subprocess.Popen([sys.executable, "resumo.py"])
+    except Exception:
+        pass
+
+
 def _watch_esc() -> None:
     """
     GetAsyncKeyState em vez de 'keyboard': hotkey por nome depende do
@@ -262,6 +380,9 @@ def _watch_esc() -> None:
     VK_ESCAPE = 0x1B
     while not (user32.GetAsyncKeyState(VK_ESCAPE) & 0x8000):
         time.sleep(0.05)
+    if _tentar_gerar_resumo():
+        _flush_stats_final()
+        _launch_resumo()
     _matar_irmaos()
     os._exit(1)
 
@@ -985,6 +1106,7 @@ def monitor_match() -> None:
                 CICLOS_FEITOS += 1
                 save_status(0, REHOST_MAX, CICLOS_FEITOS)
                 save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
+                _stats_close_em_partida(erro=True)
                 disconnect_and_relaunch()
                 return
 
@@ -998,6 +1120,7 @@ def monitor_match() -> None:
             CICLOS_FEITOS += 1
             save_status(0, REHOST_MAX, CICLOS_FEITOS)
             save_config_update(partidas_concluidas=0, ciclos=CICLOS_FEITOS)
+            _stats_close_em_partida(erro=True)
             disconnect_and_relaunch()
             return
 
@@ -1105,6 +1228,7 @@ if __name__ == "__main__":
         # lobby.py, sem esse flag) precisa da checagem de verdade.
         if "--fonte-ok" not in sys.argv and not wait_for_match_start(timeout=30):
             _log("fonte.png não achou em 30s (sem confirmação prévia) - reiniciando dota")
+            _stats_close_em_partida(erro=True)
             disconnect_and_relaunch()
 
         # fonte.png confirmado (aqui ou pelo fim_game via --fonte-ok): limpa
