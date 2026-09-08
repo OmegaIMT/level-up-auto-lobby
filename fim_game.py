@@ -832,6 +832,34 @@ BRANCH_CHECK_TIMEOUT = 3.0   # só decide qual ramo do fluxo seguir (cancel em w
 GO_IT_WAIT_TIMEOUT = 10.0    # esperando o popup de sucesso (go_it.png) aparecer - só wings
 
 
+def _rank_templates(rank: str) -> list[str]:
+    """{rank}.png, {rank}1.png, {rank}2.png... - variantes do ícone (mesmo
+    motivo do dog*.png no Endless: visual muda um pouco entre capturas, um
+    template só não bate sempre). Glob com [0-9] logo após o nome do rank,
+    NÃO "{rank}*.png" solto - os ranks têm prefixo um do outro (s/ss/sss),
+    "s*.png" bateria em ss.png/sss.png também."""
+    base = glob.glob(os.path.join(WINGS_IMG_DIR, f"{rank}.png"))
+    variantes = sorted(glob.glob(os.path.join(WINGS_IMG_DIR, f"{rank}[0-9]*.png")))
+    return [os.path.basename(p) for p in base + variantes]
+
+
+def _aguardar_rank_aparecer(
+    rank: str, region: Optional[Region], timeout: float = RANK_ICON_WAIT_TIMEOUT
+) -> Optional[tuple[int, int]]:
+    """Espera QUALQUER variante do ícone do rank aparecer (ver
+    _rank_templates) - tenta todas a cada poll, devolve a primeira que
+    achar."""
+    templates = _rank_templates(rank) or [f"{rank}.png"]
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for nome in templates:
+            pos = locate(f"wing_rank_{nome}", nome, base_dir=WINGS_IMG_DIR, confidence=0.70, region=region)
+            if pos:
+                return pos
+        time.sleep(0.3)
+    return None
+
+
 def _rank_row_region(coords: dict, prefix: str) -> Optional[Region]:
     """Faixa horizontal (Y) onde fica a linha de checkbox de rank
     (b...ex), largura da tela inteira - usa só o Y de {prefix}_b/
@@ -882,9 +910,7 @@ def vender_wings() -> None:
 
     rank_region = _rank_row_region(c, "wing")
     for rank in ranks:
-        rank_pos = _aguardar_aparecer(
-            f"wing_rank_{rank}", f"{rank}.png", base_dir=WINGS_IMG_DIR, timeout=RANK_ICON_WAIT_TIMEOUT, region=rank_region
-        )
+        rank_pos = _aguardar_rank_aparecer(rank, region=rank_region, timeout=RANK_ICON_WAIT_TIMEOUT)
         if rank_pos:
             click_pos(rank_pos, 0.3, rest=False)
 
@@ -938,9 +964,7 @@ def vender_equipamento() -> None:
 
         rank_region = _rank_row_region(c, "equip")
         for rank in ranks:
-            rank_pos = _aguardar_aparecer(
-                f"wing_rank_{rank}", f"{rank}.png", base_dir=WINGS_IMG_DIR, timeout=RANK_ICON_WAIT_TIMEOUT, region=rank_region
-            )
+            rank_pos = _aguardar_rank_aparecer(rank, region=rank_region, timeout=RANK_ICON_WAIT_TIMEOUT)
             if rank_pos:
                 click_pos(rank_pos, 0.3, rest=False)
 
