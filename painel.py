@@ -33,13 +33,6 @@ TEXT_DEFAULTS = {
     "ciclos_label": "ciclos",
     "exit_label": "exit",
     "esc_key": "esc",
-    "status_label": "status",
-    "tempo_label": "tempo",
-    "connecting_label": "conectando até",
-    "status_buscando_sala": "buscando sala",
-    "status_aguardando": "aguardando",
-    "status_conectando": "conectando",
-    "status_em_partida": "em partida",
 }
 
 TEXT: dict = {}
@@ -237,64 +230,14 @@ def read_status() -> dict | None:
     return None
 
 
-# status ("buscando_sala"/"aguardando"/"em_partida") sempre tem um valor -
-# status/tempo ficam sempre visíveis. Só o "conectando até HH:MM:SS" (mesmo
-# estilo de antes, exclusivo do estado "conectando") entra/sai do painel.
-_conexao_alvo_visible = False
-
-
-def _update_conexao_alvo(deadline: float) -> None:
-    global _conexao_alvo_visible
-    now = time.time()
-
-    if deadline and deadline > now:
-        alvo = time.strftime("%H:%M:%S", time.localtime(deadline))
-        label_conexao_alvo.config(text=f"{TEXT.get('connecting_label', 'conectando até')}: {alvo}")
-        if not _conexao_alvo_visible:
-            label_conexao_alvo.pack(fill="x", padx=10, pady=(0, 0), before=label_exit)
-            root.geometry(f"{LARGURA}x{ALTURA_EXPANDIDA}+{root.winfo_x()}+{root.winfo_y()}")
-            _conexao_alvo_visible = True
-    elif _conexao_alvo_visible:
-        label_conexao_alvo.pack_forget()
-        root.geometry(f"{LARGURA}x{ALTURA_BASE}+{root.winfo_x()}+{root.winfo_y()}")
-        _conexao_alvo_visible = False
-
-
-def _format_tempo(segundos: float, crescente: bool) -> str:
-    segundos = max(segundos, 0.0)
-    total = int(segundos) if crescente else int(segundos + 0.999)
-    mm, ss = divmod(total, 60)
-    return f"{'+' if crescente else '-'}{mm:02d}:{ss:02d}"
-
-
 def render(status: dict) -> None:
     partidas   = status.get("partidas", 0)
     rehost_max = status.get("rehost_max", 0)
     ciclos     = status.get("ciclos", 0)
-    estado     = status.get("status", "buscando_sala")
-    status_since     = status.get("status_since", 0.0)
-    conexao_deadline = status.get("conexao_deadline", 0.0)
 
     label_rehost.config(text=f"{TEXT.get('rehost_label', 're-host')} = {partidas}/{rehost_max}")
     label_ciclos.config(text=f"{TEXT.get('ciclos_label', 'ciclos')}  = {ciclos}")
     label_exit.config(text=f"{TEXT.get('exit_label', 'exit')}  = {TEXT.get('esc_key', 'esc')}")
-
-    estado_texto = TEXT.get(f"status_{estado}", estado)
-    label_status.config(text=f"{TEXT.get('status_label', 'status')} = {estado_texto}")
-
-    now = time.time()
-    if estado == "conectando":
-        # decrescente até conexao_deadline - mesmo estilo/campo de sempre.
-        restante = conexao_deadline - now
-        label_tempo.config(text=f"{TEXT.get('tempo_label', 'tempo')}  = {_format_tempo(restante, crescente=False)}")
-        _update_conexao_alvo(conexao_deadline)
-    else:
-        # crescente desde que entrou nesse status (buscando_sala/aguardando/
-        # em_partida) - em_partida só zera quando o lobby.py reinicia
-        # (fechou o ciclo ou deu erro), não a cada re-host dentro do ciclo.
-        decorrido = (now - status_since) if status_since else 0.0
-        label_tempo.config(text=f"{TEXT.get('tempo_label', 'tempo')}  = {_format_tempo(decorrido, crescente=True)}")
-        _update_conexao_alvo(0.0)
 
 
 def poll() -> None:
@@ -305,14 +248,7 @@ def poll() -> None:
         no_data = TEXT.get("no_data", "--")
         label_rehost.config(text=f"{TEXT.get('rehost_label', 're-host')} = {no_data}/{no_data}")
         label_ciclos.config(text=f"{TEXT.get('ciclos_label', 'ciclos')}  = {no_data}")
-        label_status.config(text=f"{TEXT.get('status_label', 'status')} = {no_data}")
-        label_tempo.config(text=f"{TEXT.get('tempo_label', 'tempo')}  = {no_data}")
         label_exit.config(text=f"{TEXT.get('exit_label', 'exit')}  = {TEXT.get('esc_key', 'esc')}")
-        _update_conexao_alvo(0.0)
-    else:
-        # sem mudança no status.json (mtime igual) - mesmo assim o "tempo"
-        # (crescente ou decrescente) precisa seguir andando a cada tick.
-        render(_last_status)
 
     root.after(POLL_INTERVAL, poll)
 
@@ -346,8 +282,7 @@ if __name__ == "__main__":
     root.wm_attributes("-alpha", 0.80)
     root.configure(bg="black")
 
-    LARGURA, ALTURA_BASE = 260, 120  # + 40 das linhas "status"/"tempo" (sempre visíveis agora)
-    ALTURA_EXPANDIDA = ALTURA_BASE + 20  # + linha "conectando até" (só durante o status "conectando")
+    LARGURA, ALTURA_BASE = 260, 80
     pos_x = root.winfo_screenwidth() - LARGURA - 20
     root.geometry(f"{LARGURA}x{ALTURA_BASE}+{pos_x}+20")
 
@@ -361,23 +296,6 @@ if __name__ == "__main__":
     label_ciclos = tk.Label(root, text="ciclos  = 0", fg=COLOR, bg="black",
                             font=FONT, anchor="w")
     label_ciclos.pack(fill="x", padx=10, pady=(0, 0))
-
-    # status (buscando sala/aguardando/conectando/em partida) + tempo
-    # (crescente ou decrescente conforme o status - ver render()) - ao
-    # contrário do antigo "conectando", ficam sempre visíveis, pois sempre
-    # existe algum status ativo.
-    label_status = tk.Label(root, text="status = buscando sala", fg=COLOR, bg="black",
-                            font=FONT, anchor="w")
-    label_status.pack(fill="x", padx=10, pady=(0, 0))
-
-    label_tempo = tk.Label(root, text="tempo  = +00:00", fg=COLOR, bg="black",
-                           font=FONT, anchor="w")
-    label_tempo.pack(fill="x", padx=10, pady=(0, 0))
-
-    # "conectando até HH:MM:SS" - criado aqui mas só entra na tela (pack)
-    # durante o status "conectando", ver _update_conexao_alvo().
-    label_conexao_alvo = tk.Label(root, text="", fg=COLOR, bg="black",
-                                  font=FONT, anchor="w")
 
     label_exit = tk.Label(root, text="exit  = esc", fg=COLOR, bg="black",
                           font=FONT, anchor="w")
